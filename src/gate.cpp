@@ -34,13 +34,13 @@ void gate_move_test(void)
     delay(5000);
 
     // start pos — 45 degrees more clockwise
-    gateServo.setPosition(485, 70, HerkulexLed::Blue);
+    gateServo.setPosition(785, 70, HerkulexLed::Blue);
 
     // move 90 degrees clockwise
-    gateServo.setPosition(213, 70, HerkulexLed::Green);
+    gateServo.setPosition(513, 70, HerkulexLed::Green);
     delay(1000);
 
     // back to start pos
-    gateServo.setPosition(485, 70, HerkulexLed::Blue);
+    gateServo.setPosition(785, 70, HerkulexLed::Blue);
 
 }
