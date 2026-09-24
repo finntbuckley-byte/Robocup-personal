@@ -16,5 +16,7 @@ void turnLeft();
 void turnRight();
 void stopMotors();
 bool isReversing();
+int  lastDriveLeftPct();    // last commanded signed % (before pulse scaling)
+int  lastDriveRightPct();
 
 #endif /* __DRIVE_H */

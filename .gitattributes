@@ -1,0 +1,11 @@
+# Text files: normalise line endings in the repo, native endings on checkout
+* text=auto
+
+# Binary - never touch line endings (autocrlf would corrupt these)
+*.pdf  binary
+*.zip  binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.hex  binary
+*.elf  binary

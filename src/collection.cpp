@@ -19,8 +19,10 @@ static bool collectionStateEntry = false; //so we only run digitalwrite and serv
 #define MOVE_TO_DROP_END_ANGLE   -5 //previously 15
 #define MOVE_TO_DROP_RAMP_MS     800  // must stay < SERVODELAY2 — see note below
 #define AT_REST 70 //previously 90
+#define DROP_SETTLE_MS 1000 // pause before magnets off (was a blocking delay(1000)) - stops the weight being flung
 
 static unsigned long moveToDropRampStart = 0;
+static bool magnetsReleased = false;
 int servoPos = 0;
 
 enum CollectionState
@@ -40,11 +42,17 @@ void collection_init(void)
     pinMode(MAG2, OUTPUT);
     pinMode(MAG1, OUTPUT);
     bigServo.attach(BIG_SERVO);
+    bigServo.write(AT_REST); // start parked (replaces the per-tick write(1) in collection_update)
+}
+
+// true for the whole pickup -> drop -> rest cycle; navigation holds still while set
+bool collection_busy(void)
+{
+    return state != COLLECTION_IDLE;
 }
 
 void collection_start(void)
 {
-
     if (state == COLLECTION_IDLE)
     {
         collectionStateEntryTime = millis();
@@ -57,11 +65,12 @@ void collection_start(void)
         Serial.println(F("[collection] start ignored, cycle already in progress"));
         return;
     } //don't want to start another cycle while picking up a different weight
-
 }
 
 void collection_update(void)
 {
+    // removed: bigServo.write(1) here ran every tick and overrode the 110 deg
+    // pickup / 70 deg rest writes below
     switch (state)
     {
         case COLLECTION_IDLE:
@@ -137,13 +146,22 @@ void collection_update(void)
                 Serial.print(WEIGHTDROPDELAY);
                 Serial.println(F("ms)"));
                 Serial.print("waiting at end");
-                delay(1000); // added this so that small pause in crane movement before weight drops before was flinging the weight
-                digitalWrite(MAG1, LOW);
-                digitalWrite(MAG2, LOW);
+                magnetsReleased = false;
                 collectionStateEntry = false;
             }
 
-            if (millis() - collectionStateEntryTime >= WEIGHTDROPDELAY)
+            // non-blocking version of the old delay(1000) before magnets off
+            if (!magnetsReleased && millis() - collectionStateEntryTime >= DROP_SETTLE_MS)
+            {
+                digitalWrite(MAG1, LOW);
+                digitalWrite(MAG2, LOW);
+                magnetsReleased = true;
+            }
+
+            // same timing as before: WEIGHTDROPDELAY counts from DROP entry, so with
+            // both at 1000 the crane heads to rest right after release. Raise it to
+            // give the weight time to fall first.
+            if (magnetsReleased && millis() - collectionStateEntryTime >= WEIGHTDROPDELAY)
             {
                 Serial.println(F("[collection] DROP -> FINISHED"));
                 state = COLLECTION_FINISHED;

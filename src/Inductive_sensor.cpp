@@ -20,16 +20,21 @@ bool was_metallic = false;
 void magnet_on_init(void)
 {
     pinMode(INDUCPIN, INPUT);
-    Serial1.begin(115200);
+    // Serial1.begin() removed: nothing here uses Serial1, and opening it takes
+    // D0/D1 away from the drive motors (CON65).
 }
+
+#define INDUC_READ_MS 100   // was a blocking delay(100) - now rate-limited
 
 void should_magnet_turn_on(void)
 {
-  // put your main code here, to run repeatedly:
+  static unsigned long lastRead = 0;
+  if (millis() - lastRead < INDUC_READ_MS) return;
+  lastRead = millis();
+
   InducProxState = digitalRead(INDUCPIN);
   Serial.println("new next reading");
   Serial.println(InducProxState);
-  delay(500);
 
   
 

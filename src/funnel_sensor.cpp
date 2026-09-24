@@ -1,6 +1,6 @@
 #include "funnel_sensor.h"
 #include "config.h"
-#include <math.h>
+#include "tof.h"
 
 // ============================================================================
 //  funnel_sensor.cpp
@@ -8,21 +8,23 @@
 //  State flow (simple edge-triggered classifier, decoupled from
 //  collection.cpp's pickup FSM - see funnel_sensor.h for why):
 //
-//    CLEAR    funnel IR sees nothing.
-//    PRESENT  funnel IR just tripped. Start a classification window
+//    CLEAR    weight-detect ToF sees nothing in the funnel band.
+//    PRESENT  something just entered the band. Start a classification window
 //             (SORT_CLASSIFY_WINDOW_MS) and watch the inductive sensor for
 //             a trigger anywhere in that window (metal can register partway
-//             through the slide, not necessarily at the exact instant the
-//             IR trips).
+//             through the slide, not necessarily at the exact instant
+//             presence trips).
 //    VERDICT  window elapsed -> count it as real (metal seen) or dummy (no
-//             metal seen), print the result, then wait for the IR to clear
-//             before arming again - so one object isn't counted twice while
-//             it's still sitting there.
+//             metal seen), print the result, then wait for the funnel to
+//             clear before arming again - so one object isn't counted twice
+//             while it's still sitting there.
 //
-//  INDUCTIVE WIRING NOTE: most inductive proximity sensors (e.g. the
-//  LJ18A3-8-Z/BY used in this course) are NPN and pull LOW when they detect
-//  metal. INDUCTIVE_ACTIVE_LOW in config.h defaults to that - flip it if
-//  yours reads the other way.
+//  Presence comes from the weight-detect ToF across the notch (TOF_UPRIGHT,
+//  CON27) - tof.cpp keeps it fresh; this module only interprets it.
+//
+//  INDUCTIVE WIRING: LJ18A3-8-Z/BY -> inductive level-shift board -> CON70
+//  (A6Z, pin 20). NPN sensors pull LOW on metal; INDUCTIVE_ACTIVE_LOW in
+//  config.h matches Inductive_sensor.cpp's tested METALLIC = 0.
 //
 //  TO TIE THIS TO A SPECIFIC PICKUP CYCLE instead of running continuously:
 //  add an "armed" flag here, set true a fixed delay after collection_start()
@@ -36,27 +38,8 @@ int dummyCount       = 0;
 enum FunnelState { FUNNEL_CLEAR, FUNNEL_PRESENT, FUNNEL_VERDICT_WAIT };
 static FunnelState state = FUNNEL_CLEAR;
 
-static uint16_t funnelMM = 0;
 static unsigned long presentSince = 0;
 static bool sawInductiveThisPass = false;
-
-static unsigned long irLastRead = 0;
-
-static float irReadVolts(int pin)
-{
-  long sum = 0;
-  for (int i = 0; i < IR_SAMPLES; i++) sum += analogRead(pin);
-  float counts = (float)sum / IR_SAMPLES;
-  return counts * (IR_ADC_VREF / IR_ADC_COUNTS);
-}
-
-static uint16_t irVoltsToMM(float volts, float A, float B, int minMM, int maxMM)
-{
-  if (volts < 0.10f) return 0;
-  float mm = A * pow(volts, B);
-  if (mm < minMM || mm > maxMM) return 0;
-  return (uint16_t)mm;
-}
 
 static inline bool inductiveTriggered()
 {
@@ -67,23 +50,21 @@ static inline bool inductiveTriggered()
 void funnelSensorInit()
 {
 #if USE_FUNNEL_SORT
-  pinMode(PIN_IR_FUNNEL, INPUT);
   pinMode(PIN_INDUCTIVE, INPUT);
 #endif
 }
 
-bool weightInFunnel() { return funnelMM > 0 && funnelMM < FUNNEL_PRESENT_MM; }
+bool weightInFunnel()
+{
+  return tofOk(TOF_UPRIGHT) &&
+         tofUpright >= FUNNEL_MIN_MM && tofUpright < FUNNEL_PRESENT_MM;
+}
+
+bool inductiveMetalNow() { return inductiveTriggered(); }
 
 void funnelSortUpdate()
 {
 #if USE_FUNNEL_SORT
-  if (millis() - irLastRead >= IR_READ_MS)
-  {
-    irLastRead = millis();
-    funnelMM = irVoltsToMM(irReadVolts(PIN_IR_FUNNEL), IR_SIDE_A, IR_SIDE_B,
-                           IR_SIDE_MIN_MM, IR_SIDE_MAX_MM);
-  }
-
   bool present = weightInFunnel();
 
   switch (state)
@@ -110,7 +91,7 @@ void funnelSortUpdate()
         else
         {
           dummyCount++;
-          Serial.print(">>> FUNNEL: non-metal (dummy/Sphero) #"); Serial.println(dummyCount);
+          Serial.print(">>> FUNNEL: non-metal (dummy) #"); Serial.println(dummyCount);
         }
         state = FUNNEL_VERDICT_WAIT;
       }

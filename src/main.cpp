@@ -12,6 +12,9 @@
 #include "config.h"
 #include "Inductive_sensor.h"
 
+unsigned long startTime;
+bool collectionStarted = false;
+
 // ============================================================================
 //  main.cpp  -  full RoboCup robot: navigation + weight-seek + real pickup
 //  + funnel sorting classification.
@@ -68,6 +71,7 @@
 void setup()
 {
   Serial.begin(115200);
+  startTime = millis();
 
   motor_init();          // partner's code
   collection_init();
@@ -98,8 +102,9 @@ void loop()
 
   // 3. crane/magnet FSM - always ticks, navigation just starts/watches it
     //collection_update();  // called every iteration, unconditionally, no delay
-    gate_move_test();
-    gate_update();
+    //gate_move_test();
+    //gate_update();
+    collection_update();
 
     // trigger one pickup cycle on command, so you can watch each step happen
     /*if (Serial.available())
@@ -110,6 +115,12 @@ void loop()
             collection_start();
         }
     }*/
+   if (!collectionStarted && millis() - startTime >= 10000)
+    {
+        collection_start();
+        Serial.print ("collection should have started");
+        collectionStarted = true;
+    }
 
   // 4. funnel sorting - independent of navigation/collection, see
   //    funnel_sensor.h for why
@@ -119,7 +130,7 @@ void loop()
   navigationUpdate();
 
   // 6. tell the humans
-  printTelemetry();*/
-  should_magnet_turn_on();
+  printTelemetry();
+  //should_magnet_turn_on();*/
 
 }

@@ -1,6 +1,28 @@
 #include "weight_detect.h"
 #include "tof.h"
+#include "x8.h"
 #include "config.h"
+
+// A bottom ToF sees something, and the 8x8's obstacle band on the same side
+// sees nothing at a similar distance -> something short -> weight candidate.
+// (Replaces the old bottom-vs-top-front ToF pairing.)
+static bool pairSeesWeight(uint16_t bot, uint16_t top)
+{
+  if (bot == 0 || bot < WEIGHT_MIN_MM || bot > WEIGHT_MAX_MM) return false;
+  if (top == 0) return true;
+  return top >= bot + DIFF_CLEAR_MARGIN_MM;
+}
+
+// Without a fresh 8x8 frame we can't tell a weight from a wall, so no
+// candidates - better to miss one than to drive into a wall "approaching" it.
+static bool weightLeft()
+{
+  return x8Fresh() && tofOk(TOF_BL) && pairSeesWeight(tofBL, x8LeftMM());
+}
+static bool weightRight()
+{
+  return x8Fresh() && tofOk(TOF_BR) && pairSeesWeight(tofBR, x8RightMM());
+}
 
 bool     weightFound  = false;
 int      weightSide   = 0;

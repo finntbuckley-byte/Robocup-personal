@@ -2,7 +2,7 @@
 #include "motor.h"
 #include "collection.h"
 
-
+/*
 IntervalTimer myTimer; //sets up a timer interrupt in case we want it
 
 void myISR()
@@ -27,6 +27,6 @@ void loop()
     {
         collection_start();
     }
-    */
-}
+    *//*
+}*/
 

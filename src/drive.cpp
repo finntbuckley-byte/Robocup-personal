@@ -8,12 +8,14 @@ static int lastRightPct = 0;
 static inline int clampPct(int v) { return v > 100 ? 100 : (v < -100 ? -100 : v); }
 
 // motor.h takes a magnitude (0-100) + explicit forward/backward call, so a
-// signed percent needs routing to the right function.
+// signed percent needs routing to the right function. The magnitude is scaled
+// into MOTOR_MAX_*_PCT so the pulse never leaves the driver's 1.05-1.95 ms
+// window (see config.h).
 static void driveOneMotor(int pct, int motorNum)
 {
   pct = clampPct(pct);
-  if (pct > 0)      motorForward(pct, motorNum);
-  else if (pct < 0) motorBackward(-pct, motorNum);
+  if (pct > 0)      motorForward(pct * MOTOR_MAX_FWD_PCT / 100, motorNum);
+  else if (pct < 0) motorBackward(-pct * MOTOR_MAX_REV_PCT / 100, motorNum);
   else              motorStop(motorNum);
 }
 
@@ -32,3 +34,5 @@ void turnLeft()     { drive(-TURN_SPEED_PCT,  +TURN_SPEED_PCT);  }
 void stopMotors()   { drive(0, 0); }
 
 bool isReversing() { return lastLeftPct < 0 && lastRightPct < 0; }
+int  lastDriveLeftPct()  { return lastLeftPct; }
+int  lastDriveRightPct() { return lastRightPct; }

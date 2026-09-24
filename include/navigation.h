@@ -1,7 +1,8 @@
 #ifndef __NAVIGATION_H
 #define __NAVIGATION_H
 // ============================================================================
-//  navigation.h  -  full nav + weight-seek + real pickup state machine.
+//  navigation.h  -  nav + weight-seek + real pickup state machine.
+//  Only call navigationUpdate() while roundRunning() (see nav_main.cpp).
 // ============================================================================
 
 #include <Arduino.h>

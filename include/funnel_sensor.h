@@ -4,8 +4,8 @@
 //  funnel_sensor.h  -  weight sorting at the end of the funnel.
 //
 //  Two sensors, one job: figure out what just went past the funnel end.
-//    - analog IR (PIN_IR_FUNNEL)   : "is something here at all"
-//    - inductive sensor (PIN_INDUCTIVE) : "is it metal"
+//    - weight-detect ToF (TOF_UPRIGHT) : "is something here at all"
+//    - inductive sensor (PIN_INDUCTIVE): "is it metal"
 //
 //  This runs INDEPENDENTLY of the collection/navigation state machines -
 //  it just watches the funnel end continuously and classifies whatever
@@ -25,9 +25,10 @@ void funnelSensorInit();
 void funnelSortUpdate();
 
 bool weightInFunnel();          // true while something is currently detected
+bool inductiveMetalNow();       // raw inductive state, for telemetry
 
 // classification counters/telemetry - read-only from outside this module
 extern int realWeightCount;     // classified metal
-extern int dummyCount;          // classified non-metal (dummy or Sphero)
+extern int dummyCount;          // classified non-metal (dummy)
 
 #endif /* __FUNNEL_SENSOR_H */

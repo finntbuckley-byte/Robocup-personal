@@ -1,9 +1,13 @@
 #ifndef __TOF_H
 #define __TOF_H
 // ============================================================================
-//  tof.h  -  7x ToF: 2 low (weight), 4 top+corner (obstacle), 1 rear (obstacle)
-//  See config.h for the full sensor map and the TOF_* index constants.
-//  Convention: distance 0 == "nothing in range / clear".
+//  tof.h  -  4x ToF on the XSHUT chain:
+//    bottom-left / bottom-right (VL53L0X) - weight detection, APPROACH
+//    weight-detect across the notch       - funnel presence
+//    rear (VL53L1X)                       - reversing clearance
+//  See config.h for the sensor map and the TOF_* index constants.
+//  The front obstacle sensor (SEN0628 8x8) is in x8.h, not here.
+//  Convention: distance 0 == "nothing in range / clear / sensor missing".
 // ============================================================================
 
 #include <Arduino.h>
@@ -11,16 +15,12 @@
 extern uint16_t tofMM[];   // indexed by TOF_BL..TOF_REAR, see config.h
 
 // friendly references - same identifiers used throughout navigation/weight_detect
-extern uint16_t &tofBL, &tofBR, &tofFL, &tofFR, &cornerL, &cornerR, &tofRear;
+extern uint16_t &tofBL, &tofBR, &tofUpright, &tofRear;
 
 void tofInit();
 void tofUpdate();
 
-uint16_t frontWallMM();
-bool weightLeft();
-bool weightRight();
-bool cornerNearLeft();
-bool cornerNearRight();
+bool tofOk(int index);     // sensor initialised and answering
 bool rearBlocked();
 
 #endif /* __TOF_H */

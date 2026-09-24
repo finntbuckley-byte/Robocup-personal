@@ -2,43 +2,47 @@
 #include "config.h"
 #include "drive.h"
 #include "tof.h"
+#include "x8.h"
 #include "ir_sensors.h"
 #include "weight_detect.h"
 #include "collection.h"
+#include "round.h"
 
 // ============================================================================
-//  navigation.cpp
-// renamed to txt while testing servo since errors occurred here
+//  navigation.cpp  -  built only by [env:nav] (see platformio.ini).
+//
 //  Same core control shapes throughout this project:
 //      DISCRETE decisions -> bang-bang with hysteresis:
 //          FORWARD / TURN_L / TURN_R / ESCAPE, flip detection, escalating
 //          escapes.
 //      CONTINUOUS tracking -> proportional / PD:
-//          - caution veer: proportional lean away from walls entering
-//            CAUTION_MM (top-front ToF pair)
+//          - caution veer: proportional lean away from whichever half of the
+//            SEN0628 obstacle band enters CAUTION_MM
 //          - side nudge: step away from a side IR getting too close
-//          - APPROACH: PD on the low-front-pair imbalance to centre a
+//          - APPROACH: PD on the bottom-ToF-pair imbalance to centre a
 //            weight candidate
 //
-//  PICKUP - THE REAL MECHANISM (this is what's new vs earlier nav-only
-//  builds, which only had a placeholder "drive through it"):
-//      APPROACH  close at 55%, PD-centring the weight dead ahead
-//      PICKUP    weight passes the trigger distance under the low ToF pair
-//                -> STOP, call collection_start() once, hold position while
-//                collection_busy() (your partner's crane/magnet FSM) runs
-//                the full pickup -> drop -> rest cycle, then move on.
-//                We can't confirm the magnets actually grabbed anything at
-//                ground level (a dummy weight won't be attracted) - see
-//                funnel_sensor.cpp for the ACTUAL real/dummy classification,
-//                which happens later, at the funnel end. So PICKUP always
-//                suppresses re-detection of that spot afterward, win or lose.
-//      REPOSITION  turn away from the spot just worked (no reverse needed -
-//                the crane operates in place, we never drove into anything)
-//                then resume searching.
+//  OBSTACLES come from the SEN0628 8x8 (x8.h), split into left/right halves
+//  of its obstacle band. If its frame goes stale (x8Fresh() false) the front
+//  is UNKNOWN: FORWARD crawls at BLIND_SPEED_PCT with the side IR nudge only,
+//  turns end on time, and no weight candidates are reported.
 //
-//  SCAN: nothing found for SCAN_TRIGGER_MS of cruising -> spin on the spot
-//  for SCAN_MAX_MS (timed: no IMU here to measure the angle - see "IMU HOOK"
-//  below for where that would plug in instead).
+//  PICKUP:
+//      APPROACH  close at APPROACH_SPEED_PCT, PD-centring the weight
+//      PICKUP    weight inside PICKUP_TRIGGER_MM -> STOP, collection_start()
+//                once, hold still while collection_busy(), then move on
+//                (or give up after PICKUP_TIMEOUT_MS). The grab can't be
+//                confirmed here - funnel_sensor.cpp classifies what actually
+//                arrives - so the spot is suppressed afterwards either way.
+//      REPOSITION  turn away from the spot just worked, then resume.
+//
+//  ROUND (round.h): weights are only approached while roundWantsWeights() -
+//  i.e. under the 3-target cap and before RETURN_HOME_AT_MS. After that the
+//  robot keeps avoiding obstacles but ignores weights (RETURN_HOME needs the
+//  IMU - see IMU HOOK below).
+//
+//  SCAN: nothing found for SCAN_TRIGGER_MS -> spin on the spot for
+//  SCAN_MAX_MS (timed - see IMU HOOK).
 //
 //  Priority: rear guard > pickup > approach > hard avoid > caution veer /
 //            side nudge > cruise
@@ -105,40 +109,43 @@ static void requestTurn(int dir)
 }
 
 // ---------------------------------------------------------------------------
-//  Obstacle picture. Top-front pair + angled corner pair define an
-//  obstacle. A low-pair-only return is a weight candidate, not a wall.
+//  Obstacle picture - SEN0628 obstacle band, left/right halves. A bottom-
+//  pair-only return is a weight candidate (weight_detect.cpp), not a wall.
 // ---------------------------------------------------------------------------
-static bool obstacleLeft()
-{
-  return (tofFL > 0 && tofFL < NEAR_MM) || cornerNearLeft();
-}
-static bool obstacleRight()
-{
-  return (tofFR > 0 && tofFR < NEAR_MM) || cornerNearRight();
-}
-static bool leftOpen()
-{
-  return (tofFL == 0 || tofFL > FAR_MM) && !cornerNearLeft();
-}
-static bool rightOpen()
-{
-  return (tofFR == 0 || tofFR > FAR_MM) && !cornerNearRight();
-}
+static inline bool isNear(uint16_t mm) { return mm > 0 && mm < NEAR_MM; }
+static inline bool isOpen(uint16_t mm) { return mm == 0 || mm > FAR_MM; }
+static inline uint16_t room(uint16_t mm) { return mm == 0 ? 0xFFFF : mm; }
+
+static bool obstacleLeft()  { return x8Fresh() && isNear(x8LeftMM()); }
+static bool obstacleRight() { return x8Fresh() && isNear(x8RightMM()); }
+static bool leftOpen()      { return x8Fresh() && isOpen(x8LeftMM()); }
+static bool rightOpen()     { return x8Fresh() && isOpen(x8RightMM()); }
+
+// spin toward whichever half has more room
+static int roomierSide() { return room(x8RightMM()) >= room(x8LeftMM()) ? +1 : -1; }
 
 static int cautionVeer()
 {
+  if (!x8Fresh()) return 0;
+  uint16_t l = x8LeftMM(), r = x8RightMM();
   int veer = 0;
-  if (tofFL > 0 && tofFL < CAUTION_MM && tofFL >= NEAR_MM)
-    veer += (int)(KC_AVOID * (CAUTION_MM - tofFL));
-  if (tofFR > 0 && tofFR < CAUTION_MM && tofFR >= NEAR_MM)
-    veer -= (int)(KC_AVOID * (CAUTION_MM - tofFR));
+  if (l > 0 && l < CAUTION_MM && l >= NEAR_MM) veer += (int)(KC_AVOID * (CAUTION_MM - l));
+  if (r > 0 && r < CAUTION_MM && r >= NEAR_MM) veer -= (int)(KC_AVOID * (CAUTION_MM - r));
   if (veer >  CAUTION_VEER_MAX) veer =  CAUTION_VEER_MAX;
   if (veer < -CAUTION_VEER_MAX) veer = -CAUTION_VEER_MAX;
   return veer;
 }
 
+static void startApproach()
+{
+  lastFindOrEvent = millis();
+  approachErrPrev = 0;
+  setMode(MODE_APPROACH);
+}
+
 void navigationInit()
 {
+  lastTurn = 0; flipCount = 0;
   lastFindOrEvent = millis();
   setMode(MODE_FORWARD);
 }
@@ -147,6 +154,14 @@ void navigationInit()
 void navigationUpdate()
 {
   unsigned long held = millis() - modeStart;
+  bool wantWeights = roundWantsWeights();
+
+  // IMU HOOK: once the IMU is back, roundWantsHome() is where a RETURN_HOME
+  // mode takes over - heading back toward the start corner (heading zeroed at
+  // roundJustStarted()), then a DELIVER mode opens the rear flap and calls
+  // noteDelivered(). Until then the robot keeps roaming and avoiding, but
+  // stops collecting (see wantWeights) so it never exceeds the 3-target cap.
+  // BEACON HOOK: fallback homing on an IR beacon slots in the same place.
 
   // ================= decide =================
   switch (mode)
@@ -155,22 +170,17 @@ void navigationUpdate()
     {
       if (obstacleLeft() && obstacleRight())
       {
-        escapeSpinDir = (tofFR >= tofFL) ? 1 : -1;
+        escapeSpinDir = roomierSide();
         escapeSpinMs  = ESCAPE_SPIN_MS;
         setMode(MODE_ESCAPE);
       }
       else if (obstacleLeft())  requestTurn(+1);
       else if (obstacleRight()) requestTurn(-1);
-      else if (weightFound)
-      {
-        lastFindOrEvent = millis();
-        approachErrPrev = 0;
-        setMode(MODE_APPROACH);
-      }
+      else if (wantWeights && weightFound) startApproach();
 #if USE_SCAN
       // IMU HOOK: with a heading reference, this could scan a bounded sweep
       // (e.g. +/-60 degrees) instead of a blind, un-measured spin.
-      else if (millis() - lastFindOrEvent > SCAN_TRIGGER_MS)
+      else if (wantWeights && x8Fresh() && millis() - lastFindOrEvent > SCAN_TRIGGER_MS)
       {
         scanDir = -scanDir;
         setMode(MODE_SCAN);
@@ -180,13 +190,14 @@ void navigationUpdate()
     }
 
     case MODE_TURN_RIGHT:
-      if (held > MAX_TURN_MS)
+      if (held > MAX_TURN_MS && x8Fresh())
       {
         escapeSpinDir = 1;
         escapeSpinMs  = ESCAPE_SPIN_MS + 800;
         setMode(MODE_ESCAPE);
       }
-      else if (held > MIN_TURN_MS && leftOpen())
+      // stale 8x8: can't see whether it's open, so end on time
+      else if (held > MIN_TURN_MS && (leftOpen() || !x8Fresh()))
       {
         lastTurnEnd = millis();
         setMode(MODE_FORWARD);
@@ -194,13 +205,13 @@ void navigationUpdate()
       break;
 
     case MODE_TURN_LEFT:
-      if (held > MAX_TURN_MS)
+      if (held > MAX_TURN_MS && x8Fresh())
       {
         escapeSpinDir = -1;
         escapeSpinMs  = ESCAPE_SPIN_MS + 800;
         setMode(MODE_ESCAPE);
       }
-      else if (held > MIN_TURN_MS && rightOpen())
+      else if (held > MIN_TURN_MS && (rightOpen() || !x8Fresh()))
       {
         lastTurnEnd = millis();
         setMode(MODE_FORWARD);
@@ -217,13 +228,8 @@ void navigationUpdate()
       break;
 
     case MODE_SCAN:
-      if (weightFound)
-      {
-        lastFindOrEvent = millis();
-        approachErrPrev = 0;
-        setMode(MODE_APPROACH);
-      }
-      else if (held > SCAN_MAX_MS || obstacleLeft() || obstacleRight())
+      if (wantWeights && weightFound) startApproach();
+      else if (held > SCAN_MAX_MS || obstacleLeft() || obstacleRight() || !wantWeights)
       {
         lastFindOrEvent = millis();
         setMode(MODE_FORWARD);
@@ -236,13 +242,15 @@ void navigationUpdate()
       {
         if (obstacleLeft() && obstacleRight())
         {
-          escapeSpinDir = (tofFR >= tofFL) ? 1 : -1;
+          escapeSpinDir = roomierSide();
           escapeSpinMs  = ESCAPE_SPIN_MS;
           setMode(MODE_ESCAPE);
         }
         else requestTurn(obstacleLeft() ? +1 : -1);
         break;
       }
+
+      if (!wantWeights) { setMode(MODE_FORWARD); break; }
 
       if (weightFound && weightDistMM > 0 && weightDistMM < PICKUP_TRIGGER_MM)
       {
@@ -260,14 +268,14 @@ void navigationUpdate()
     case MODE_PICKUP:
       if (!pickupStarted)
       {
-        collection_start();      // your partner's crane/magnet FSM
+        collection_start();      // partner's crane/magnet FSM
         pickupStarted = true;
       }
-      else if (!collection_busy())
+      else if (!collection_busy() || held > PICKUP_TIMEOUT_MS)
       {
         pickupAttempts++;
-        Serial.print(">>> PICKUP ATTEMPT #"); Serial.println(pickupAttempts);
-        Serial.println("    (real vs dummy confirmed separately - see funnel telemetry)");
+        Serial.print(">>> PICKUP ATTEMPT #"); Serial.print(pickupAttempts);
+        Serial.println(held > PICKUP_TIMEOUT_MS ? " (TIMED OUT waiting for crane)" : "");
         // can't confirm the grab from here (a dummy won't be attracted to
         // the magnets) - suppress regardless so we don't loop on this spot
         suppressTargetFor(TARGET_SUPPRESS_MS);
@@ -288,10 +296,11 @@ void navigationUpdate()
   {
     case MODE_FORWARD:
     {
+      int speed = x8Fresh() ? CRUISE_SPEED_PCT : BLIND_SPEED_PCT;
       int steer = cautionVeer();
       if (sideNearLeft())  steer += SIDE_NUDGE_PCT;
       if (sideNearRight()) steer -= SIDE_NUDGE_PCT;
-      drive(CRUISE_SPEED_PCT + steer, CRUISE_SPEED_PCT - steer);
+      drive(speed + steer, speed - steer);
       break;
     }
 
@@ -348,8 +357,4 @@ void navigationUpdate()
   // ---- universal rear guard: never reverse into something we can see ----
   if (isReversing() && rearBlocked())
     stopMotors();
-
-  // BEACON HOOK: once an IR beacon is added, a "return to base" mode would
-  // slot in here - e.g. triggered after N pickups or with time running low -
-  // steering on beacon signal instead of the ToF/IR obstacle picture.
 }
