@@ -28,11 +28,34 @@ static bool justStarted = false;
 static int deliveredCount = 0;
 
 static unsigned long goDownSince = 0;
+static unsigned long goUpSince = 0;
+static bool goArmed = false;     // GO counts only after it's been seen RELEASED
 
+static bool goActiveRaw()
+{
+  return GO_ACTIVE_LOW ? (digitalRead(PIN_GO) == LOW) : (digitalRead(PIN_GO) == HIGH);
+}
+
+// Safety: a button held, stuck, or misread at boot must never start the
+// round. GO arms only after GO_DEBOUNCE_MS of continuous "released", then
+// needs GO_DEBOUNCE_MS of continuous "pressed".
 static bool goPressed()
 {
   if (PIN_GO < 0) return false;
-  bool active = GO_ACTIVE_LOW ? (digitalRead(PIN_GO) == LOW) : (digitalRead(PIN_GO) == HIGH);
+  bool active = goActiveRaw();
+
+  if (!goArmed)
+  {
+    if (active) { goUpSince = 0; return false; }
+    if (goUpSince == 0) goUpSince = millis();
+    if (millis() - goUpSince >= GO_DEBOUNCE_MS)
+    {
+      goArmed = true;
+      Serial.println("Round: GO armed - press to start");
+    }
+    return false;
+  }
+
   if (!active) { goDownSince = 0; return false; }
   if (goDownSince == 0) goDownSince = millis();
   return millis() - goDownSince >= GO_DEBOUNCE_MS;
@@ -43,8 +66,17 @@ void roundInit()
   if (PIN_GO >= 0) pinMode(PIN_GO, GO_ACTIVE_LOW ? INPUT_PULLUP : INPUT);
   initAt = millis();
   phase = PHASE_WAITING;
+  goArmed = false;
+  goUpSince = goDownSince = 0;
   Serial.print("Round: waiting for ");
-  if (PIN_GO >= 0) Serial.println("GO button");
+  if (PIN_GO >= 0)
+  {
+    delay(5);   // let the pull-up settle before the diagnostic read
+    Serial.print("GO button (pin "); Serial.print(PIN_GO);
+    Serial.print(" reads "); Serial.print(digitalRead(PIN_GO) ? "HIGH" : "LOW");
+    Serial.print(" = "); Serial.print(goActiveRaw() ? "PRESSED" : "released");
+    Serial.println(")");
+  }
   else { Serial.print("auto-start in "); Serial.print(AUTO_START_DELAY_MS); Serial.println("ms"); }
 }
 

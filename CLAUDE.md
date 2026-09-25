@@ -117,7 +117,7 @@ drive, 1× VL53L0X + 2× VL53L1X, serial ToF, 2× HC-SR04 ultrasound, DFRobot SE
 
 The **TCS34725 colour sensor has been dropped** from the design, so base arrival can't be
 confirmed by colour. The Herkulex gate servo goes through a digital level-shift board to
-**CON67 (SERIAL7)**.
+**CON66 (SERIAL2)**. The crane servo is on **CON67** (pin 28).
 
 > The code may still reference the old ToF layout (top-front, corners) until the SEN0628
 > migration is done. Treat those as legacy.
@@ -289,20 +289,17 @@ normalised values, for colour-sensor data.
    | I2CD (CON44) | TCA9548 mux, 0x70 |
 
    A cable to RAW I2C0 puts that sub-assembly on `Wire`; a cable to RAW I2C1 puts it on
-   `Wire1`. The course photos show all four going to I2C0. **Current code assumes one bus.**
-   The team doesn't know how ours are cabled, so run the `wirefind` sketch: its report
-   prints which bus the XSHUT expander and each ToF answer on.
+   `Wire1`. **RESOLVED 2026-09-25 (wirefind):** CON26 (XSHUT expander) and CON35 (ToF bus)
+   are cabled to RAW I2C0 → `Wire`. The SEN0628 is on I2C1 → `Wire1`. The mux (CON44) isn't
+   connected. ToF models confirmed: XSHUT0 = L1X, XSHUT1/2 = L0X, XSHUT3 = L1X.
 5. ~~XSHUT placeholders~~ **RESOLVED 2026-09-24:** bottom-left CON29 (XSHUT2),
    bottom-right CON28 (XSHUT1), weight-detect/upright CON27 (XSHUT0), rear CON30
    (XSHUT3). Top-front and corner ToFs no longer exist. Still to confirm: whether the weight-detect
    ToF is an L0X or L1X (`wirefind` reports it).
 6. SEN0628 integration is agreed but not yet in code. It is on **CON64 (RAW I2C1 → `Wire1`)**,
    0x33. The ToF chain now re-addresses from 0x34 to stay clear of it.
-7. **Pin 28 clash:** the Herkulex gate is on CON67 = SERIAL7 (RX7 = pin 28, TX7 = pin 29),
-   and `collection.cpp` also drives the crane servo on pin 28. `Serial7.begin()` takes pin
-   28 over as a UART input, so the crane and the gate can't both work as written. Find
-   which connector the crane servo's signal wire is really plugged into. The recommended
-   fix is to move the Herkulex cable to CON66 (SERIAL2); see `BENCH_TODO.md`.
+7. ~~Pin 28 clash~~ **RESOLVED 2026-09-25:** the crane servo is on CON67 (pin 28) and the
+   Herkulex gate is on **CON66 (SERIAL2)**. `gate.cpp` uses `Serial2`.
 
 ---
 

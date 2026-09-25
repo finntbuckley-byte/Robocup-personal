@@ -36,8 +36,17 @@ void x8Init()
     Serial.println("!! SEN0628 @0x33 not responding - check CON64 / X8_WIRE in config.h");
     return;
   }
+  // The SEN0628 keeps its own power across a Teensy reset/re-flash, so it
+  // can still be answering a request from the previous run - the first mode
+  // command then sees a stale reply and fails. Retry (seen 2026-09-25).
   Serial.println("SEN0628 found - setting 8x8 mode (blocks 5s)...");
-  if (x8.setRangingMode(eMatrix_8X8) != 0)
+  bool modeOk = false;
+  for (int attempt = 1; attempt <= X8_MODE_RETRIES && !modeOk; attempt++)
+  {
+    modeOk = (x8.setRangingMode(eMatrix_8X8) == 0);
+    if (!modeOk) { Serial.print("  8x8 mode attempt "); Serial.print(attempt); Serial.println(" failed - retrying"); delay(200); }
+  }
+  if (!modeOk)
   {
     Serial.println("!! SEN0628 would not enter 8x8 mode");
     return;

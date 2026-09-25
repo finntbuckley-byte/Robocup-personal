@@ -1,0 +1,95 @@
+
+--- RoboCup G23 nav build ---
+ToF 0 (XSHUT2 CON29, L0X) ok
+ToF 1 (XSHUT1 CON28, L0X) ok
+ToF 2 (XSHUT0 CON27, L1X) ok
+ToF 3 (XSHUT3 CON30, L1X) ok
+SEN0628 found - setting 8x8 mode (blocks 5s)...
+!! SEN0628 would not enter 8x8 mode
+Round: waiting for GO button (pin 14 reads LOW = PRESSED)
+
+=========== nav build ===========
+ ?  this menu
+ g  print the 8x8 grid (orientation / band check)
+ t  telemetry on/off
+ x  KILL - stop motors until reset
+=================================
+ms	round	mode	BL	BR	UP	REAR	X8L	X8R	IRL	IRR	fun	ind	W	picks	real	dummy	drvL	drvR
+0	WAIT	-	674	585	0	0	stale	stale	309	171	0	0	-	0	0	0	0	0
+0	WAIT	-	674	589	0	399	stale	stale	320	173	0	0	-	0	0	0	0	0
+0	WAIT	-	677	582	0	397	stale	stale	314	172	0	0	-	0	0	0	0	0
+0	WAIT	-	707	581	0	398	stale	stale	300	168	0	0	-	0	0	0	0	0
+0	WAIT	-	727	580	0	398	stale	stale	312	176	0	0	-	0	0	0	0	0
+0	WAIT	-	719	584	0	402	stale	stale	319	175	0	0	-	0	0	0	0	0
+0	WAIT	-	717	578	0	398	stale	stale	307	169	0	0	-	0	0	0	0	0
+0	WAIT	-	723	586	0	395	stale	stale	297	176	0	0	-	0	0	0	0	0
+0	WAIT	-	719	587	0	399	stale	stale	291	168	0	0	-	0	0	0	0	0
+0	WAIT	-	716	588	0	396	stale	stale	313	176	0	0	-	0	0	0	0	0
+0	WAIT	-	707	596	0	398	stale	stale	313	176	0	0	-	0	0	0	0	0
+0	WAIT	-	700	604	0	401	stale	stale	295	167	0	0	-	0	0	0	0	0
+0	WAIT	-	694	619	0	398	stale	stale	321	173	0	0	-	0	0	0	0	0
+0	WAIT	-	693	618	0	398	stale	stale	289	172	0	0	-	0	0	0	0	0
+0	WAIT	-	685	618	0	398	stale	stale	301	171	0	0	-	0	0	0	0	0
+0	WAIT	-	686	605	0	399	stale	stale	304	173	0	0	-	0	0	0	0	0
+0	WAIT	-	677	616	0	397	stale	stale	298	244	0	0	-	0	0	0	0	0
+0	WAIT	-	693	627	0	400	stale	stale	305	238	0	0	-	0	0	0	0	0
+0	WAIT	-	711	644	0	399	stale	stale	312	246	0	0	-	0	0	0	0	0
+0	WAIT	-	723	636	0	401	stale	stale	303	260	0	0	-	0	0	0	0	0
+0	WAIT	-	702	661	0	398	stale	stale	321	176	0	0	-	0	0	0	0	0
+0	WAIT	-	725	652	0	398	stale	stale	305	176	0	0	-	0	0	0	0	0
+0	WAIT	-	725	646	0	400	stale	stale	305	176	0	0	-	0	0	0	0	0
+0	WAIT	-	738	657	0	397	stale	stale	313	175	0	0	-	0	0	0	0	0
+0	WAIT	-	712	664	0	398	stale	stale	290	171	0	0	-	0	0	0	0	0
+0	WAIT	-	704	675	0	399	stale	stale	306	170	0	0	-	0	0	0	0	0
+0	WAIT	-	713	671	0	399	stale	stale	312	174	0	0	-	0	0	0	0	0
+0	WAIT	-	718	664	0	400	stale	stale	301	172	0	0	-	0	0	0	0	0
+0	WAIT	-	715	673	0	403	stale	stale	305	174	0	0	-	0	0	0	0	0
+0	WAIT	-	727	669	0	396	stale	stale	305	176	0	0	-	0	0	0	0	0
+0	WAIT	-	705	688	0	398	stale	stale	305	176	0	0	-	0	0	0	0	0
+0	WAIT	-	720	691	0	402	stale	stale	305	163	0	0	-	0	0	0	0	0
+0	WAIT	-	698	669	0	401	stale	stale	311	175	0	0	-	0	0	0	0	0
+0	WAIT	-	709	671	0	401	stale	stale	302	171	0	0	-	0	0	0	0	0
+0	WAIT	-	695	686	0	399	stale	stale	312	176	0	0	-	0	0	0	0	0
+0	WAIT	-	701	675	0	398	stale	stale	305	174	0	0	-	0	0	0	0	0
+0	WAIT	-	706	680	0	400	stale	stale	304	173	0	0	-	0	0	0	0	0
+0	WAIT	-	699	684	0	397	stale	stale	312	168	0	0	-	0	0	0	0	0
+0	WAIT	-	718	671	0	395	stale	stale	312	175	0	0	-	0	0	0	0	0
+0	WAIT	-	730	674	0	396	stale	stale	305	166	0	0	-	0	0	0	0	0
+0	WAIT	-	703	682	0	402	stale	stale	296	174	0	0	-	0	0	0	0	0
+0	WAIT	-	725	695	0	397	stale	stale	313	176	0	0	-	0	0	0	0	0
+0	WAIT	-	715	716	0	400	stale	stale	305	176	0	0	-	0	0	0	0	0
+0	WAIT	-	729	747	0	397	stale	stale	312	176	0	0	-	0	0	0	0	0
+0	WAIT	-	702	752	0	395	stale	stale	319	175	0	0	-	0	0	0	0	0
+0	WAIT	-	493	626	0	402	stale	stale	313	176	0	0	-	0	0	0	0	0
+0	WAIT	-	699	737	0	398	stale	stale	287	174	0	0	-	0	0	0	0	0
+0	WAIT	-	819	684	0	400	stale	stale	308	170	0	0	-	0	0	0	0	0
+0	WAIT	-	858	621	0	398	stale	stale	312	176	0	0	-	0	0	0	0	0
+0	WAIT	-	877	563	0	400	stale	stale	305	171	0	0	-	0	0	0	0	0
+0	WAIT	-	892	513	0	398	stale	stale	297	174	0	0	-	0	0	0	0	0
+0	WAIT	-	866	493	0	398	stale	stale	305	173	0	0	-	0	0	0	0	0
+0	WAIT	-	851	451	0	399	stale	stale	320	173	0	0	-	0	0	0	0	0
+0	WAIT	-	813	416	0	396	stale	stale	320	165	0	0	-	0	0	0	0	0
+0	WAIT	-	760	384	0	396	stale	stale	304	175	0	0	-	0	0	0	0	0
+0	WAIT	-	747	364	0	400	stale	stale	307	168	0	0	-	0	0	0	0	0
+0	WAIT	-	716	369	0	400	stale	stale	310	174	0	0	-	0	0	0	0	0
+0	WAIT	-	784	372	0	399	stale	stale	308	173	0	0	-	0	0	0	0	0
+0	WAIT	-	830	375	0	399	stale	stale	299	171	0	0	-	0	0	0	0	0
+0	WAIT	-	879	385	0	400	stale	stale	312	176	0	0	-	0	0	0	0	0
+0	WAIT	-	845	382	0	401	stale	stale	308	167	0	0	-	0	0	0	0	0
+0	WAIT	-	875	381	0	397	stale	stale	312	167	0	0	-	0	0	0	0	0
+0	WAIT	-	885	386	0	399	stale	stale	312	172	0	0	-	0	0	0	0	0
+0	WAIT	-	907	393	0	400	stale	stale	303	175	0	0	-	0	0	0	0	0
+0	WAIT	-	904	399	0	399	stale	stale	305	176	0	0	-	0	0	0	0	0
+0	WAIT	-	894	399	0	395	stale	stale	312	173	0	0	-	0	0	0	0	0
+0	WAIT	-	942	404	0	400	stale	stale	298	164	0	0	-	0	0	0	0	0
+0	WAIT	-	937	405	0	399	stale	stale	313	174	0	0	-	0	0	0	0	0
+0	WAIT	-	935	412	0	397	stale	stale	305	173	0	0	-	0	0	0	0	0
+0	WAIT	-	933	409	0	400	stale	stale	306	171	0	0	-	0	0	0	0	0
+0	WAIT	-	922	409	0	400	stale	stale	305	174	0	0	-	0	0	0	0	0
+0	WAIT	-	911	409	0	399	stale	stale	318	172	0	0	-	0	0	0	0	0
+0	WAIT	-	892	414	0	400	stale	stale	305	176	0	0	-	0	0	0	0	0
+0	WAIT	-	909	412	0	398	stale	stale	311	175	0	0	-	0	0	0	0	0
+0	WAIT	-	937	418	0	398	stale	stale	311	172	0	0	-	0	0	0	0	0
+0	WAIT	-	1026	424	0	397	stale	stale	305	197	0	0	-	0	0	0	0	0
+0	WAIT	-	1036	429	0	400	stale	stale	290	198	0	0	-	0	0	0	0	0
+0	WAIT	-	1030	431	0	397	stale	stale	308	173	0	0	-	0	0	0	0	0

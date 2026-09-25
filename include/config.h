@@ -110,6 +110,7 @@ const byte SX_REG_DATA_A = 0x11;
 const unsigned long TOF_BOOT_MS      = 50;   // after raising XSHUT - proven necessary
 const unsigned long TOF_PERIOD_MS    = 50;   // continuous-mode inter-measurement period
 const unsigned long TOF_L1X_BUDGET_US = 33000;
+const uint16_t TOF_MAX_VALID_MM = 4000;   // VL53L1X long-mode max; above = garbage
 
 // ---------------------------------------------------------------------------
 // SEN0628 8x8 MATRIX ToF  -  front obstacle sensing
@@ -128,14 +129,20 @@ const float X8_COL_SIGN   = +1.0f;   // +1: column 7 is the robot's RIGHT
 const float X8_FOV_DEG    = 60.0f;   // horizontal field of view
 // Rows used for OBSTACLES. They must look ABOVE weight height (70mm) so a
 // weight on the floor isn't treated as a wall - pick from the grid print.
+// Measured 2026-09-25 facing open floor: r7/r6/r5 see the FLOOR at
+// ~390/490/640mm (uniform across columns - also fakes "wall ahead"), so r5
+// is out. An upright weight 25cm ahead is below r7 entirely (the bottom ToFs
+// see it, the 8x8 doesn't). Orientation confirmed: hand on the left -> c0-c3,
+// r0 = top (sees over the 400mm wall).
 const uint8_t X8_BAND_LO  = 2;
-const uint8_t X8_BAND_HI  = 5;
+const uint8_t X8_BAND_HI  = 4;
 const uint16_t X8_MAX_VALID_MM   = 3000;  // beyond this = no return
 const uint16_t X8_WALL_SPREAD_MM = 150;   // flat across >=7 columns = wall
 
 // getAllData() blocks ~20-40ms per call (the library polls with delay(17)),
 // so don't read faster than needed. setRangingMode() blocks 5s at init.
 const unsigned long X8_READ_MS  = 100;
+const int X8_MODE_RETRIES = 3;
 // No fresh frame for this long -> treat the front as unknown (crawl).
 const unsigned long X8_STALE_MS = 400;
 
@@ -143,7 +150,8 @@ const unsigned long X8_STALE_MS = 400;
 // ANALOG IR SENSORS  -  2x side, wall/scrape nudge
 // ---------------------------------------------------------------------------
 // Side L/R mapped on the physical board: left = CON24 (A9Z, pin 23),
-// right = CON23 (A8Z, pin 22).
+// right = CON23 (A8Z, pin 22). Confirmed by hand test 2026-09-25: object at
+// ~150mm on the left read 2100 counts on pin 23 = 147mm via the curve below.
 const int PIN_IR_SIDE_L = A9;      // CON24
 const int PIN_IR_SIDE_R = A8;      // CON23
 
@@ -166,11 +174,12 @@ const int SIDE_NUDGE_PCT = 15;
 // ---------------------------------------------------------------------------
 // FUNNEL PRESENCE  -  the weight-detect ToF (TOF_UPRIGHT, CON27) across the
 // notch. Something inside this band = an object is in the funnel.
-// TODO(verify): read the empty-channel background with the robot built, and
-// set FUNNEL_PRESENT_MM well short of it.
+// Measured 2026-09-25 (wirefind 't', L1X short mode): empty funnel 87-112mm,
+// weight in the funnel 52-59mm. Threshold sits in the gap.
+// TODO(verify): repeat with the weight lying down and at each side of the notch.
 // ---------------------------------------------------------------------------
 const int FUNNEL_MIN_MM     = 20;   // below this = sensor noise / blind zone
-const int FUNNEL_PRESENT_MM = 90;
+const int FUNNEL_PRESENT_MM = 75;
 
 // ---------------------------------------------------------------------------
 // INDUCTIVE SENSOR  -  metal (real weight) vs non-metal (dummy) at the
@@ -214,14 +223,17 @@ const int SCAN_SPIN_PCT      = 50;
 const int REPOSITION_SPEED_PCT = 55;
 const unsigned long REPOSITION_TURN_MS = 700;
 
-// DFR0513 only accepts 1.05-1.95 ms; motor.cpp maps 100% to 1.0/2.0 ms.
-// drive() SCALES its -100..100 command into these limits (keeps steering
-// differential at full cruise). From motor.cpp's mapping:
+// DFR0513 max pulses confirmed by the team 2026-09-25: 1950us forward,
+// 1050us reverse. motor.cpp maps 100% to 1.0/2.0 ms, so drive() SCALES its
+// -100..100 command into these limits (keeps steering differential at full
+// cruise). From motor.cpp's mapping (integer maths, so 1us inside the limit):
 //   fwd: 1842 + 68*158/100 = 1949 us     rev: 1188 - 73*188/100 = 1051 us
-// TODO(verify): speed-ramp test - if the tracks still run at 69-100%
-// unscaled, the driver's real window is wider and these can go up.
 const int MOTOR_MAX_FWD_PCT = 68;
 const int MOTOR_MAX_REV_PCT = 73;
+
+// Scales EVERY drive command (after navigation, before the pulse caps).
+// 50 for first floor tests; set back to 100 once avoidance behaves.
+const int DRIVE_SCALE_PCT = 50;
 
 // ---------------------------------------------------------------------------
 // WEIGHT DETECTION  (bottom ToF vs 8x8 obstacle band, same side)
@@ -259,11 +271,13 @@ const unsigned long PICKUP_TIMEOUT_MS = 8000;
 // ---------------------------------------------------------------------------
 // ROUND  -  start trigger, 2-minute timer, on-board target cap
 // ---------------------------------------------------------------------------
-// GO button (blue, 3-pin analogue port). -1 = not wired yet: the round
-// auto-starts AUTO_START_DELAY_MS after boot.
-// TODO(verify): wire the GO button (e.g. A0Z CON68 = pin 14) and set this.
-const int  PIN_GO           = -1;
-const bool GO_ACTIVE_LOW    = true;
+// GO button (blue) on CON68 = A0Z = pin 14. Measured 2026-09-25 with the
+// nav build's goD/goA telemetry: released ~0.6V (digital 0), pressed ~3.0V
+// (digital 1) -> active HIGH. The button board drives both levels, so no
+// pull-up is used. Set PIN_GO to -1 to fall back to auto-starting
+// AUTO_START_DELAY_MS after boot.
+const int  PIN_GO           = 14;
+const bool GO_ACTIVE_LOW    = false;
 const unsigned long GO_DEBOUNCE_MS      = 50;
 const unsigned long AUTO_START_DELAY_MS = 3000;
 

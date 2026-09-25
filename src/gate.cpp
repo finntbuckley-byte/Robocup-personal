@@ -5,13 +5,11 @@
 
 #define GATE_SERVO 1
 
-// Serial1 (D0/D1, CON65) is the drive motors' PPM pins - opening a UART there
-// kills the motor pulses. The Herkulex goes through the digital level-shift
-// board to CON67 = SERIAL7 (RX7 pin 28, TX7 pin 29).
-// TODO(verify): collection.cpp drives the crane servo on pin 28 = RX7 - the
-// same pin. Serial7.begin() takes pin 28 over as UART RX, so both can't work
-// as written. Find where the crane servo's signal wire actually lands.
-#define GATE_SERIAL Serial7
+// Serial1 (D0/D1, CON65) is the drive motors' PPM pins, and CON67 (Serial7,
+// pin 28) carries the crane servo - opening a UART on either kills those
+// pulses. The Herkulex goes through the digital level-shift board to
+// CON66 = SERIAL2 (RX2 D7, TX2 D8). Confirmed on the board 2026-09-25.
+#define GATE_SERIAL Serial2
 
 HerkulexServoBus herkulexBus(GATE_SERIAL);
 HerkulexServo gateServo(herkulexBus, GATE_SERVO);

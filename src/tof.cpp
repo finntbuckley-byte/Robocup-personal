@@ -132,7 +132,9 @@ void tofUpdate()
     {
       if (!l1x[i].dataReady()) continue;
       uint16_t mm = l1x[i].read(false);
-      tofMM[i] = (l1x[i].ranging_data.range_status == VL53L1X::RangeValid) ? mm : 0;
+      // seen 2026-09-25: "valid" status with 64351mm - reject anything past range
+      bool valid = l1x[i].ranging_data.range_status == VL53L1X::RangeValid && mm <= TOF_MAX_VALID_MM;
+      tofMM[i] = valid ? mm : 0;
     }
     else
     {

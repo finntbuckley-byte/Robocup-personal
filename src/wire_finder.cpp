@@ -316,6 +316,10 @@ static void tofStart()
     mask |= (1 << x);
     xshutWriteAll(mask);
     delay(50);
+    // XSHUT reset puts the sensor back on 0x29, but the driver objects still
+    // hold the address from the last 't' - start them fresh
+    l0x[x] = VL53L0X();
+    l1x[x] = VL53L1X();
     if (s.kind == TOF_L0X) {
       l0x[x].setBus(s.bus);
       l0x[x].setTimeout(100);

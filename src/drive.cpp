@@ -13,7 +13,7 @@ static inline int clampPct(int v) { return v > 100 ? 100 : (v < -100 ? -100 : v)
 // window (see config.h).
 static void driveOneMotor(int pct, int motorNum)
 {
-  pct = clampPct(pct);
+  pct = clampPct(pct) * DRIVE_SCALE_PCT / 100;
   if (pct > 0)      motorForward(pct * MOTOR_MAX_FWD_PCT / 100, motorNum);
   else if (pct < 0) motorBackward(-pct * MOTOR_MAX_REV_PCT / 100, motorNum);
   else              motorStop(motorNum);

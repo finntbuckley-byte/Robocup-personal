@@ -19,8 +19,8 @@
  *    6. telemetry - tab-separated, paste straight into a spreadsheet
  *
  *  NOT IN THIS BUILD YET:
- *    - gate.cpp (Herkulex flap): Serial7 takes pin 28 = the crane servo.
- *      Add gate_init() once the pin 28 clash is fixed (BENCH_TODO.md step 2).
+ *    - gate/flap SORTING logic (gate.cpp is initialised and serviced, but
+ *      nothing commands it yet)
  *    - IMU / RETURN_HOME (see IMU HOOK in navigation.cpp).
  * ============================================================================ */
 #ifdef NAV_BUILD
@@ -38,6 +38,7 @@
 #include "weight_detect.h"
 #include "navigation.h"
 #include "round.h"
+#include "gate.h"
 
 static bool killed = false;          // 'x' on the serial menu - bench safety only
 
@@ -55,7 +56,7 @@ static bool telemetryOn = true;
 
 static void printTelemetryHeader()
 {
-  Serial.println("ms\tround\tmode\tBL\tBR\tUP\tREAR\tX8L\tX8R\tIRL\tIRR\tfun\tind\tW\tpicks\treal\tdummy\tdrvL\tdrvR");
+  Serial.println("ms\tround\tmode\tBL\tBR\tUP\tREAR\tX8L\tX8R\tIRL\tIRR\tfun\tind\tW\tpicks\treal\tdummy\tdrvL\tdrvR\tgoD\tgoA");
 }
 
 static void printTelemetry()
@@ -89,7 +90,10 @@ static void printTelemetry()
   Serial.print(realWeightCount);        Serial.print('\t');
   Serial.print(dummyCount);             Serial.print('\t');
   Serial.print(lastDriveLeftPct());     Serial.print('\t');
-  Serial.println(lastDriveRightPct());
+  Serial.print(lastDriveRightPct());    Serial.print('\t');
+  // raw GO pin, digital + 10-bit analog - bring-up diagnostic
+  if (PIN_GO >= 0) { Serial.print(digitalRead(PIN_GO)); Serial.print('\t'); Serial.println(analogRead(PIN_GO)); }
+  else             { Serial.println("-\t-"); }
 }
 
 static void handleSerial()
@@ -116,6 +120,7 @@ void setup()
   motor_init();          // neutral pulses straight away
   stopMotors();
   collection_init();     // crane parked at AT_REST, magnets off
+  gate_init();           // Herkulex flap on Serial2 (CON66)
 
   Wire.begin();  Wire.setClock(400000);
   Wire1.begin(); Wire1.setClock(400000);
@@ -145,6 +150,7 @@ void loop()
 
   // 3. crane FSM - always ticks, navigation just starts/watches it
   collection_update();
+  gate_update();
 
   // 4. sorting - independent of navigation/collection
   funnelSortUpdate();
