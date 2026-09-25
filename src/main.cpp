@@ -104,7 +104,7 @@ void loop()
     //collection_update();  // called every iteration, unconditionally, no delay
     //gate_move_test();
     //gate_update();
-    collection_update();
+    //collection_update();
 
     // trigger one pickup cycle on command, so you can watch each step happen
     /*if (Serial.available())
@@ -115,12 +115,13 @@ void loop()
             collection_start();
         }
     }*/
-   if (!collectionStarted && millis() - startTime >= 10000)
+   /*if (!collectionStarted && millis() - startTime >= 10000)
     {
         collection_start();
         Serial.print ("collection should have started");
         collectionStarted = true;
     }
+    */
 
   // 4. funnel sorting - independent of navigation/collection, see
   //    funnel_sensor.h for why
