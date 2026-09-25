@@ -92,9 +92,9 @@ holding >3 targets. Rejecting dummies matters (−0.5 each).
 | MCU | Teensy 4.0 on a custom PCB |
 | Locomotion | Supplied tracked chassis, two DC motors |
 | Motor driver | DFR0513 PPM driver on connector **CON65** (the SERIAL1 port: RX1 = D0, TX1 = D1). Motor 1 = **left**, motor 2 = **right**. Control is servo-style pulses: **1.05 ms full reverse, 1.50 ms stop, 1.95 ms full forward**; the driver ignores pulses outside its valid range |
-| Collection | Swing-arm crane with a **multi-magnet array** (upgraded from a single magnet to remove the single-point grip failure) |
+| Collection | Swing-arm crane with a **multi-magnet array** (upgraded from a single magnet to remove the single-point grip failure). Crane servo on CON67 (pin 28); magnets via the FET board on pins 26/27 (CON74/75). Those two pins have **no PWM** on the Teensy 4.0; the plan is to move them to 24/25 (CON72/73) for a reduced holding level (see `BENCH_TODO.md` 2d) |
 | Intake/storage | Funnel intake; hinged **rear flap** releases weights |
-| Sorting | Inductive proximity sensor at the funnel end classifies metal vs non-metal |
+| Sorting | Inductive proximity sensor **front-on at the V-notch, ~40 mm up**. It reads metal only when steel is within ~7 mm, so it both **gates the pickup** (steel weight seated in the notch → pick up; anything else → REJECT) and classifies metal vs non-metal. Dummies are rejected *before* pickup, not sorted after |
 | I2C | **TCA9548** mux (0x70) + **SX1509** GPIO expander at **0x3F**; the SX1509 drives ToF **XSHUT0–7** (plus BIO8–12) |
 | Drive encoders | The main drive motors have **built-in magnetic encoders** (direction + distance), read via the encoder IO board (2 digital lines, special 2 mm 6-pin cable). Not currently wired or used |
 
@@ -111,7 +111,7 @@ drive, 1× VL53L0X + 2× VL53L1X, serial ToF, 2× HC-SR04 ultrasound, DFRobot SE
 | **Weight-detect ToF** (VL53L1X per `nav_test`, unconfirmed) | 1 | CON27 (XSHUT0) | Across the notch. It's also the **funnel presence sensor**, replacing the ultrasound and the funnel analog IR |
 | **VL53L1X** (long range) | 1 | CON30 (XSHUT3) | Rear, reversing clearance |
 | **GP2Y0A21** analog IR (white, 100–800 mm) | 2 | Left CON24 (A9Z, pin 23), right CON23 (A8Z, pin 22) | Side-facing, wall-scrape nudge |
-| **Inductive proximity** (LJ18A3-8-Z/BY) | 1 | Via the inductive level-shift board to CON70 (A6Z, pin 20) | Funnel end, metal vs non-metal |
+| **Inductive proximity** (LJ18A3-8-Z/BY) | 1 | Via the inductive level-shift board to CON70 (A6Z, pin 20) | Front-on at the notch, ~40 mm up. **Pickup trigger** and metal vs non-metal. Active LOW (~500 counts metal, ~3485 clear) |
 | **IMU** (SEN0253 = BNO055, 0x28) | 1 | **Not fitted for now** | Homing, planned |
 | IR beacon | — | — | **Fallback only**, if IMU homing proves insufficient |
 
@@ -119,8 +119,7 @@ The **TCS34725 colour sensor has been dropped** from the design, so base arrival
 confirmed by colour. The Herkulex gate servo goes through a digital level-shift board to
 **CON66 (SERIAL2)**. The crane servo is on **CON67** (pin 28).
 
-> The code may still reference the old ToF layout (top-front, corners) until the SEN0628
-> migration is done. Treat those as legacy.
+> Only `nav_test.cpp` (commented out, a legacy rig) still references the old ToF layout.
 
 ---
 
@@ -203,7 +202,8 @@ The full connector-to-pin tables and module notes are in `docs/Parts_Summary_202
 | `gate.cpp/.h` | Herkulex rear-flap (gate) servo. **Only for releasing weights at the home base**, not for sorting. Its logic waits until IMU homing + distance estimation exist |
 | `nav_test.cpp` | Drive/nav bring-up rig with the current sensor layout (commented out, `navtest` env disabled) |
 | `wire_finder.cpp` | `wirefind` env: I2C, mux, XSHUT and port discovery, drives no actuators |
-| `servo_test.cpp` | `servotest` env: crane servo bench test |
+| `servo_test.cpp` | `servotest` env: crane bench test running the real collection FSM, with live tuning |
+| `smooth_servo.cpp/.h` | Non-blocking eased (cosine) servo moves for the crane, plus the partner's blocking helper for bench use only |
 
 Hardware checks still waiting on the robot are listed in `BENCH_TODO.md`.
 
@@ -211,31 +211,57 @@ Hardware checks still waiting on the robot are listed in `BENCH_TODO.md`.
 - **Default env (`teensy40`)** runs `main.cpp`, the partner's collection test. It starts one crane
   cycle 10 s after boot. Its `build_src_filter` excludes the nav-only files.
 - **`nav` env** is the full navigation build (`nav_main.cpp`, written 2026-09-25). It uses the new
-  4-ToF + SEN0628 layout. It compiles but **hasn't been run on the robot yet**, and several
-  `config.h` values are `TODO(verify)` until the bench checks in `BENCH_TODO.md` are done.
-  `gate.cpp` is left out until the pin 28 clash is fixed.
-- `servotest` and `wirefind` are standalone bench sketches.
+  4-ToF + SEN0628 layout and includes the gate (Serial2). **Status 2026-09-25:** it has run on
+  blocks. All sensors come up `ok`, GO starts the round, the FSM drove FORWARD/TURN from the 8×8,
+  and the kill works. The inductive pickup / CREEP / REJECT logic compiles but is **not yet tested**
+  (`BENCH_TODO.md` 2c). Floor tests are waiting on a printed part. `DRIVE_SCALE_PCT` is 50 until
+  avoidance is proven.
+- **`servotest`** runs the real `collection.cpp` cycle with live tuning over serial:
+  `pa/ps/da/ds/ra/rs` set angles and speeds, `+ - ++ -- j` jog, `save p|d|r`, and `s` prints
+  config lines.
+- **`wirefind`** is a standalone bench sketch that discovers what's connected where.
+- **Serial Monitor:** use the plug icon in the VS Code status bar. Echo and LF are on for every env.
+  Only one program can hold COM3 at a time.
+- **Tools:** `tools/serial_log.py` (log a run to `docs/testdata/` as .log + .tsv) and
+  `tools/crane_endurance.py` (N crane cycles with prompts to check for heat). Use PlatformIO's
+  Python: `%USERPROFILE%\.platformio\penv\Scripts\python.exe`. `pio` isn't on PATH, so use
+  `...\penv\Scripts\pio.exe`.
 
-### Navigation FSM (`navigation.cpp`) — 8 states
+### Navigation FSM (`navigation.cpp`) — 10 states
+It only runs while the round is RUNNING (`round.cpp`: WAIT → RUN → OVER, GO button start,
+stops at 118.5 s). Obstacles come from the 8×8's left/right halves (rows r2–r4). If the 8×8
+goes stale, the robot crawls and ignores weights.
+
 | State | Behaviour |
 |---|---|
-| `FORWARD` | Default cruise |
+| `FORWARD` | Cruise with a proportional veer away from obstacles and a side-IR nudge. Picks up straight away if the inductive reads metal |
 | `TURN_L` / `TURN_R` | Obstacle-avoidance turns |
-| `ESCAPE` | Unstick/back-off behaviour |
-| `APPROACH` | **PD steering** on the imbalance between the low-front VL53L0X pair, closing on a weight |
-| `PICKUP` | Hand-off to crane/collection |
-| `REPOSITION` | Re-align after a failed/partial pickup |
-| `SCAN` | Look for weights |
+| `ESCAPE` | Reverse (rear-guarded) and spin, after repeated flip-flopping turns or when blocked on both sides |
+| `SCAN` | Timed spin to look for weights after `SCAN_TRIGGER_MS` without a find |
+| `APPROACH` | Steer on the bottom VL53L0X pair: **PD** when both see the weight, otherwise a one-sided arc. The pickup is **not** triggered by distance |
+| `CREEP` | The bottom pair lost a candidate within 20 cm (they're blind once it's in the notch), so creep straight for up to 1 s |
+| `PICKUP` | **Triggered by the inductive sensor reading metal** (debounced 60 ms). Stop, run the crane, wait for `collection_busy()`. Metal gone afterwards = success (`noteCollected`); still there = retry once |
+| `REJECT` | The creep ended with no metal (dummy, lying weight or nothing): reverse ~10 cm, pivot away, ignore the spot for 4 s. **Unproven:** the floor test is on the todo list, and the flinger is the fallback |
+| `REPOSITION` | Turn away after a pickup |
 
-Stubs already in place: comments tagged **`IMU HOOK`** and **`BEACON HOOK`** mark where
-homing integrates. Implement IMU homing there; keep the beacon path as a fallback stub.
+Round strategy: stop collecting at **3 targets on board** (`MAX_TARGETS_ON_BOARD`). Planned: the
+3rd target is carried on the magnet at rest, which needs PWM holding (`BENCH_TODO.md` 2d).
+Comments tagged **`IMU HOOK`** and **`BEACON HOOK`** mark where homing goes; the
+time-based return (`USE_HOMING`) is off until it exists.
 
 ### Key design decisions (keep these intact)
-- **Sorting is decoupled from the collection FSM.** The funnel sensor classifies whatever
-  passes the funnel end independently of navigation/collection state. Don't couple them.
+- **The funnel classifier stays decoupled from the collection FSM.** `funnel_sensor.cpp` watches
+  the weight-detect ToF plus the inductive sensor independently, and is now telemetry only.
+  Separately, and deliberately, **navigation reads the inductive sensor to gate the pickup**
+  (changed 2026-09-25). The sensor sits at the notch, so it can reject dummies *before* the crane
+  runs.
 - Inductive proximity is the only viable metal classifier in the parts catalogue.
-- Analog IR performs badly on the black arena (low reflectivity) — known risk; that's why
-  the funnel moved to ultrasound and front sensing moved to ToF.
+- **Crane moves are always non-blocking** (`SmoothServo`). Never use the blocking
+  `smoothServoWriteSlow()` in the FSM: it stalls sensors, the round timer and the gate.
+- **GO arms only after it's been seen released.** A held, stuck or misread button can't start a
+  round (this stopped a real runaway on 2026-09-25).
+- Analog IR performs badly on the black arena (low reflectivity), which is a known risk. That's why
+  front sensing moved to ToF and funnel presence moved to the weight-detect ToF.
 - The drive motors already have built-in encoders, but they aren't wired or used yet. They are the cheapest odometry source for homing, and were recommended as a near-free
   odometry baseline for homing. Worth raising if IMU-only homing drifts.
 
@@ -256,9 +282,23 @@ homing integrates. Implement IMU homing there; keep the beacon path as a fallbac
 **Implication:** the sensor must see the *side/body* of the cylinder, not the top face,
 or insert-dummies read as metal. Weights must pass within ~6 mm.
 
-### Ultrasound (as read by the test code, ≈cm units)
+### Bench data, 2026-09-25 (logs in `docs/testdata/`)
+| Test | Result |
+|---|---|
+| Notch: steel upright | inductive **metal**, weight-detect **57–61 mm**, bottom ToFs **don't see it** |
+| Notch: steel lying | inductive **not metal**, weight-detect doesn't see it: lying weights are ignored |
+| Notch: plain plastic upright | inductive **not metal**, weight-detect 70–74 mm |
+| Notch: empty | weight-detect 77–112 mm (up to 1.5 m looking out) → `FUNNEL_PRESENT_MM` = 66 |
+| Steel 12 cm ahead of the notch | only the **bottom-left** ToF sees it (~139 mm); the 8×8 correctly doesn't |
+| 8×8 facing open floor | rows r5–r7 see the floor (~640/490/390 mm) → obstacle rows r2–r4 |
+| Side IR at ~150 mm | 2100 counts → 147 mm via the GP2Y0A21 curve |
+| GO button | idle ~0.6 V, pressed ~3.0 V → active HIGH |
+| Crane (pickup 118° @ 45°/s, drop 40° @ 60°/s, rest 70° @ 100°/s) | ~5.0 s full cycle, clean grip and drop with a weight; endurance loop gave no heat |
+| Insert-dummy at the notch | **not tested yet** (none available) |
+
+### Ultrasound (as read by the test code, ≈cm units) — **no longer on the robot**
 - 0–1 mm reads **814** (dead-band / wrap). Treat that value as "object touching",
-  not "far away" — important now that ultrasound is at the funnel end.
+  not "far away".
 - ~±1 cm to 500 mm; ±5 cm beyond 500 mm; unreliable past ~700 mm.
 
 ### Past-team data (research)
@@ -277,7 +317,7 @@ normalised values, for colour-sensor data.
    to 150 because readings below about 100 mm are unreliable.
 3. ~~Side IR left/right mapping~~ **RESOLVED 2026-09-24:** left = A9Z (CON24, pin 23),
    right = A8Z (CON23, pin 22). In `config.h`.
-4. **I2C bus topology:** the "four I2C groups" on the schematic are the board's four
+4. ~~I2C bus topology~~ **RESOLVED (see below):** the "four I2C groups" on the schematic are the board's four
    **I2C In** connectors. Each feeds one sub-assembly and must be jumper-cabled to a RAW
    I2C port:
 
@@ -294,10 +334,12 @@ normalised values, for colour-sensor data.
    connected. ToF models confirmed: XSHUT0 = L1X, XSHUT1/2 = L0X, XSHUT3 = L1X.
 5. ~~XSHUT placeholders~~ **RESOLVED 2026-09-24:** bottom-left CON29 (XSHUT2),
    bottom-right CON28 (XSHUT1), weight-detect/upright CON27 (XSHUT0), rear CON30
-   (XSHUT3). Top-front and corner ToFs no longer exist. Still to confirm: whether the weight-detect
-   ToF is an L0X or L1X (`wirefind` reports it).
-6. SEN0628 integration is agreed but not yet in code. It is on **CON64 (RAW I2C1 → `Wire1`)**,
-   0x33. The ToF chain now re-addresses from 0x34 to stay clear of it.
+   (XSHUT3). Top-front and corner ToFs no longer exist. All four positions were confirmed by
+   hand on 2026-09-25, and the weight-detect ToF is an L1X.
+6. ~~SEN0628 integration~~ **DONE 2026-09-25** (`x8.cpp`): **CON64 (RAW I2C1 → `Wire1`)**,
+   0x33. Orientation is confirmed and the obstacle rows are r2–r4. It sometimes needs a retry to
+   enter 8×8 mode after a re-flash (handled by `X8_MODE_RETRIES`). The ToF chain re-addresses
+   from 0x34 to stay clear of it.
 7. ~~Pin 28 clash~~ **RESOLVED 2026-09-25:** the crane servo is on CON67 (pin 28) and the
    Herkulex gate is on **CON66 (SERIAL2)**. `gate.cpp` uses `Serial2`.
 
@@ -306,7 +348,8 @@ normalised values, for colour-sensor data.
 ## 7. Roadmap (roughly in priority order)
 
 1. ~~Restore `navigation.cpp` and `tof.cpp`~~: done in the `nav` env (2026-09-25), untested on the robot.
-2. Resolve open issues 4 and 7 against the physical board (see `BENCH_TODO.md`).
+2. ~~Resolve open issues 4 and 7~~: done 2026-09-25. Next: the pickup-logic bench tests, then
+   floor tests once the printed part is fitted (`BENCH_TODO.md`).
 3. ~~Integrate SEN0628~~: coded in `x8.cpp`. Still needs orientation and obstacle-band tuning on the robot.
 4. Implement **IMU homing** at `IMU HOOK`: zero heading at start (start direction varies),
    track heading back toward the start corner, confirm arrival without colour (the
