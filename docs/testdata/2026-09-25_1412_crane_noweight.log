@@ -1,0 +1,36 @@
+[servo_test] booted - crane parked at rest
+=== crane bench test (real collection.cpp cycle) ===
+  c  one full cycle           l  loop cycles (any key stops)
+  p / d / r   move to pickup / drop / rest (eased)
+  pa <deg>  ps <deg/s>   pickup angle / speed
+  da <deg>  ds <deg/s>   drop angle / speed
+  ra <deg>  rs <deg/s>   rest angle / speed
+  m  magnets on/off           s  show settings (paste into config.h)
+--- paste into include/config.h ---
+const int   CRANE_PICKUP_ANGLE = 120;
+const float CRANE_PICKUP_DPS   = 45.0f;
+const int   CRANE_DROP_ANGLE   = 40;
+const float CRANE_DROP_DPS     = 60.0f;
+const int   CRANE_REST_ANGLE   = 70;
+const float CRANE_REST_DPS     = 100.0f;
+(arm is at 70 deg)
+>>> p
+[move] -> pickup 120 deg @ 45 deg/s
+[move] done in 1125 ms
+>>> d
+[move] -> drop 40 deg @ 60 deg/s
+[move] done in 1335 ms
+>>> r
+[move] -> rest 70 deg @ 100 deg/s
+[move] done in 300 ms
+>>> c
+[collection] START -> PICKUP
+[collection] PICKUP: servo -> 120 deg @ 45 deg/s, magnets ON  (dwell 1200ms)
+[collection] PICKUP -> MOVE_TO_DROP
+[collection] MOVE_TO_DROP: easing 120 -> 40 deg @ 60 deg/s  (dwell 900ms)
+[collection] MOVE_TO_DROP -> DROP
+[collection] DROP: magnets OFF  (dwell 1000ms)
+waiting at end[collection] DROP -> FINISHED
+[collection] FINISHED: servo -> 70 deg (rest)  (dwell 1500ms)
+[collection] FINISHED -> IDLE
+[cycle] done in 5035 ms

@@ -1,270 +1,200 @@
 /* ============================================================================
- *  servo_test.cpp  -  isolated bench test for the collection "big servo"
+ *  servo_test.cpp  -  crane bench test, using the REAL collection.cpp FSM
  *
  *  Build + upload:  pio run -e servotest -t upload
- *  Serial monitor:  pio device monitor -b 115200     (press '?' for the menu)
+ *  Serial monitor:  pio device monitor -b 115200     (type a command + Enter)
  *
- *  Only compiled when SERVO_TEST is defined (the servotest env sets it), so it
- *  never clashes with main.cpp's setup()/loop() in the normal build.
+ *  Only compiled when SERVO_TEST is defined (the servotest env sets it).
+ *  It links collection.cpp + smooth_servo.cpp, so a cycle here is exactly
+ *  the cycle the robot runs - there's no copy of the timings to keep in sync.
+ *  The robot does NOT drive in this build.
  *
- *  Reproduces the exact moves collection.cpp makes on pin 28:
- *      PICKUP        -> write(110), dwell SERVODELAY1
- *      MOVE_TO_DROP  -> cosine-eased ramp 116 -> -5 over 800 ms, dwell SERVODELAY2
- *      DROP          -> 1000 ms pause + WEIGHTDROPDELAY (magnets would drop here)
- *      FINISHED      -> write(AT_REST = 70), dwell SERVODELAY3
+ *  Angles and speeds start from config.h (CRANE_*) and can be changed live.
+ *  When a setting works, type  s  and paste the printed lines into config.h.
  *
- *  Magnet pins are held LOW the whole time - this rig only moves the servo.
- *
- *  Commands (end each line with Enter):
- *      ?          menu
- *      c          one full collection cycle (same timings as collection.cpp)
- *      l          loop full cycles until any key is pressed
- *      r          rest     (70 deg)
- *      p          pickup   (110 deg)
- *      d          eased drop ramp only (116 -> -5, clamps to 0)
- *      s          slow sweep 0 -> 116 -> 0, 1 deg steps (range / binding check)
- *      x          detach   (stop pulses, servo goes limp)
- *      a          re-attach
- *      0..180     go to that angle
- *      500..2500  raw pulse width in microseconds (bypasses angle mapping)
+ *  Commands (end each with Enter):
+ *      c              one full collection cycle (magnets on at pickup,
+ *                     off at drop - exactly as on the robot)
+ *      l              loop full cycles until any key
+ *      p / d / r      eased move to pickup / drop / rest at its own speed
+ *      pa 120         set pickup angle      ps 45   set pickup speed (deg/s)
+ *      da 40          set drop angle        ds 60   set drop speed (deg/s)
+ *      ra 70          set rest angle        rs 100  set rest speed (deg/s)
+ *      + / -          nudge the arm 1 deg      ++ / --  nudge 5 deg
+ *      j 105          eased move to exactly 105 deg
+ *      save p|d|r     store the CURRENT arm angle as pickup / drop / rest
+ *      m              magnets on/off (for manual positioning checks)
+ *      s              show current settings, paste-ready for config.h
+ *      ?              this menu
  * ============================================================================ */
 #ifdef SERVO_TEST
 
 #include <Arduino.h>
-#include <Servo.h>
-
-// --- copied from collection.cpp - keep in sync -------------------------------
-#define MAG1 26
-#define MAG2 27
-#define BIG_SERVO 28
-
-#define SERVODELAY1 1200
-#define SERVODELAY2 900
-#define SERVODELAY3 1500
-#define WEIGHTDROPDELAY 1000
-
-#define PICKUP_ANGLE             110
-#define MOVE_TO_DROP_START_ANGLE 116
-#define MOVE_TO_DROP_END_ANGLE   -5
-#define MOVE_TO_DROP_RAMP_MS     800
-#define AT_REST                  70
-// -----------------------------------------------------------------------------
+#include "collection.h"
 
 #define LED_PIN 13
-#define SERVO_MIN_US 544   // Servo library defaults, stated explicitly
-#define SERVO_MAX_US 2400
 
-Servo bigServo;
-static int lastAngle = AT_REST;
+static bool magnetsOn = false;
 
 static void printMenu(void)
 {
-    Serial.println(F("\n=== big servo bench test (pin 28) ==="));
-    Serial.println(F("  c  full collection cycle      l  loop cycles (any key stops)"));
-    Serial.println(F("  r  rest (70)                  p  pickup (110)"));
-    Serial.println(F("  d  eased drop ramp 116->-5    s  slow sweep 0-116-0"));
-    Serial.println(F("  x  detach (limp)              a  re-attach"));
-    Serial.println(F("  0..180    angle in degrees"));
-    Serial.println(F("  500..2500 raw pulse width in us"));
-    Serial.print(F("  attached: "));
-    Serial.println(bigServo.attached() ? F("yes") : F("NO"));
+    Serial.println(F("\n=== crane bench test (real collection.cpp cycle) ==="));
+    Serial.println(F("  c  one full cycle           l  loop cycles (any key stops)"));
+    Serial.println(F("  p / d / r   move to pickup / drop / rest (eased)"));
+    Serial.println(F("  pa <deg>  ps <deg/s>   pickup angle / speed"));
+    Serial.println(F("  da <deg>  ds <deg/s>   drop angle / speed"));
+    Serial.println(F("  ra <deg>  rs <deg/s>   rest angle / speed"));
+    Serial.println(F("  + / -  nudge 1 deg   ++ / --  nudge 5 deg   j <deg>  go to angle"));
+    Serial.println(F("  save p | save d | save r   use the CURRENT angle for pickup/drop/rest"));
+    Serial.println(F("  m  magnets on/off           s  show settings (paste into config.h)"));
 }
 
-static void goAngle(int angle)
+static void printSettings(void)
 {
-    if (!bigServo.attached()) bigServo.attach(BIG_SERVO, SERVO_MIN_US, SERVO_MAX_US);
-    bigServo.write(angle);
-    lastAngle = constrain(angle, 0, 180);
-    Serial.print(F("[servo] write("));
-    Serial.print(angle);
-    Serial.print(F(")  -> "));
-    Serial.print(bigServo.readMicroseconds());
-    Serial.println(F(" us"));
+    CraneTuning &t = collection_tuning();
+    Serial.println(F("\n--- paste into include/config.h ---"));
+    Serial.printf("const int   CRANE_PICKUP_ANGLE = %d;\n", t.pickupAngle);
+    Serial.printf("const float CRANE_PICKUP_DPS   = %.1ff;\n", t.pickupDps);
+    Serial.printf("const int   CRANE_DROP_ANGLE   = %d;\n", t.dropAngle);
+    Serial.printf("const float CRANE_DROP_DPS     = %.1ff;\n", t.dropDps);
+    Serial.printf("const int   CRANE_REST_ANGLE   = %d;\n", t.restAngle);
+    Serial.printf("const float CRANE_REST_DPS     = %.1ff;\n", t.restDps);
+    Serial.printf("(arm is at %d deg%s)\n", collection_arm_angle(),
+                  collection_arm_busy() ? ", moving" : "");
 }
 
-// returns true if a key was pressed during the wait (used to abort loops)
-static bool waitMs(unsigned long ms)
-{
-    unsigned long start = millis();
-    while (millis() - start < ms)
-    {
-        digitalWrite(LED_PIN, (millis() / 100) & 1);
-        if (Serial.available()) return true;
-    }
-    return false;
-}
-
-// same cosine ease-in-out as COLLECTION_MOVE_TO_DROP
-static void easedDropRamp(void)
-{
-    Serial.print(F("[servo] eased ramp "));
-    Serial.print(MOVE_TO_DROP_START_ANGLE);
-    Serial.print(F(" -> "));
-    Serial.print(MOVE_TO_DROP_END_ANGLE);
-    Serial.print(F(" over "));
-    Serial.print(MOVE_TO_DROP_RAMP_MS);
-    Serial.println(F(" ms"));
-
-    if (!bigServo.attached()) bigServo.attach(BIG_SERVO, SERVO_MIN_US, SERVO_MAX_US);
-    unsigned long rampStart = millis();
-    unsigned long rampElapsed;
-    int prevAngle = 999;
-    while ((rampElapsed = millis() - rampStart) <= MOVE_TO_DROP_RAMP_MS)
-    {
-        float t = (float)rampElapsed / (float)MOVE_TO_DROP_RAMP_MS;
-        float easedT = (1.0f - cos(t * PI)) / 2.0f;
-        int angle = MOVE_TO_DROP_START_ANGLE +
-                    (int)((MOVE_TO_DROP_END_ANGLE - MOVE_TO_DROP_START_ANGLE) * easedT);
-        bigServo.write(angle);
-        if (angle != prevAngle && (angle % 10 == 0 || angle < 5))
-        {
-            Serial.print(F("    t="));
-            Serial.print(rampElapsed);
-            Serial.print(F("ms angle="));
-            Serial.println(angle);
-        }
-        prevAngle = angle;
-    }
-    lastAngle = constrain(MOVE_TO_DROP_END_ANGLE, 0, 180);
-    Serial.print(F("[servo] ramp done, pulse = "));
-    Serial.print(bigServo.readMicroseconds());
-    Serial.println(F(" us"));
-}
-
-// returns true if aborted by a key press
-static bool collectionCycle(void)
+// run the FSM until the cycle finishes; returns true if aborted by a key
+static bool runCycle(void)
 {
     unsigned long t0 = millis();
-
-    Serial.println(F("\n[cycle] PICKUP"));
-    goAngle(PICKUP_ANGLE);
-    if (waitMs(SERVODELAY1)) return true;
-
-    Serial.println(F("[cycle] MOVE_TO_DROP"));
-    unsigned long moveStart = millis();
-    easedDropRamp();
-    unsigned long spent = millis() - moveStart;
-    if (spent < SERVODELAY2 && waitMs(SERVODELAY2 - spent)) return true;
-
-    Serial.println(F("[cycle] DROP (1000 ms pause + drop dwell, magnets stay off)"));
-    if (waitMs(1000 + WEIGHTDROPDELAY)) return true;
-
-    Serial.println(F("[cycle] FINISHED -> rest"));
-    goAngle(AT_REST);
-    if (waitMs(SERVODELAY3)) return true;
-
-    Serial.print(F("[cycle] done in "));
-    Serial.print(millis() - t0);
-    Serial.println(F(" ms"));
+    collection_start();
+    while (collection_busy())
+    {
+        collection_update();
+        digitalWrite(LED_PIN, (millis() / 100) & 1);
+        if (Serial.available()) return true;     // loop() keeps ticking the FSM, so the cycle still finishes
+    }
+    Serial.printf("[cycle] done in %lu ms\n", millis() - t0);
     return false;
 }
 
-static void slowSweep(void)
+static void moveAndWait(int angle, float dps, const char *name)
 {
-    Serial.println(F("[servo] slow sweep 0 -> 116 -> 0 (any key aborts)"));
-    // ease down from wherever we are so the sweep doesn't start with a jump
-    for (int a = lastAngle; a >= 0; a--)
-    {
-        bigServo.write(a);
-        if (waitMs(15)) { lastAngle = a; return; }
-    }
-    for (int a = 0; a <= MOVE_TO_DROP_START_ANGLE; a++)
-    {
-        bigServo.write(a);
-        if (a % 10 == 0) { Serial.print(F("    ")); Serial.println(a); }
-        if (waitMs(20)) { lastAngle = a; return; }
-    }
-    for (int a = MOVE_TO_DROP_START_ANGLE; a >= 0; a--)
-    {
-        bigServo.write(a);
-        if (a % 10 == 0) { Serial.print(F("    ")); Serial.println(a); }
-        if (waitMs(20)) { lastAngle = a; return; }
-    }
-    lastAngle = 0;
-    Serial.println(F("[servo] sweep done"));
+    if (!collection_move_to(angle, dps)) { Serial.println(F("busy - cycle in progress")); return; }
+    Serial.printf("[move] -> %s %d deg @ %.0f deg/s\n", name, angle, dps);
+    unsigned long t0 = millis();
+    while (collection_arm_busy()) collection_update();
+    Serial.printf("[move] done in %lu ms\n", millis() - t0);
 }
 
-static void flushInput(void)
+static const float JOG_DPS = 30.0f;   // gentle, so a nudge never jerks the arm
+
+static void jogTo(int angle)
 {
-    delay(5);
-    while (Serial.available()) Serial.read();
+    angle = constrain(angle, 0, 180);
+    if (!collection_move_to(angle, JOG_DPS)) { Serial.println(F("busy - cycle in progress")); return; }
+    while (collection_arm_busy()) collection_update();
+    Serial.print(F("[jog] arm at ")); Serial.print(collection_arm_angle()); Serial.println(F(" deg"));
+}
+
+static bool setValue(const String &key, float v)
+{
+    CraneTuning &t = collection_tuning();
+    bool isAngle = key.endsWith("a");
+    if (isAngle && (v < 0 || v > 180)) { Serial.println(F("angle must be 0-180")); return true; }
+    if (!isAngle && (v < 5 || v > 400)) { Serial.println(F("speed must be 5-400 deg/s")); return true; }
+
+    if      (key == "pa") t.pickupAngle = (int)v;
+    else if (key == "ps") t.pickupDps   = v;
+    else if (key == "da") t.dropAngle   = (int)v;
+    else if (key == "ds") t.dropDps     = v;
+    else if (key == "ra") t.restAngle   = (int)v;
+    else if (key == "rs") t.restDps     = v;
+    else return false;
+
+    Serial.printf("[set] %s = %g\n", key.c_str(), v);
+    return true;
 }
 
 void setup()
 {
     pinMode(LED_PIN, OUTPUT);
-    pinMode(MAG1, OUTPUT);
-    pinMode(MAG2, OUTPUT);
-    digitalWrite(MAG1, LOW);
-    digitalWrite(MAG2, LOW);
-
     Serial.begin(115200);
     unsigned long start = millis();
     while (!Serial && millis() - start < 3000) {}
 
-    bigServo.attach(BIG_SERVO, SERVO_MIN_US, SERVO_MAX_US);
-    Serial.println(F("\n[servo_test] booted, moving to rest"));
-    goAngle(AT_REST);
+    collection_init();          // attaches the servo, parks at the rest angle
+    collection_magnets(false);
+    Serial.println(F("\n[servo_test] booted - crane parked at rest"));
     printMenu();
+    printSettings();
 }
 
 void loop()
 {
-    digitalWrite(LED_PIN, (millis() / 500) & 1);   // slow blink = alive, waiting
+    collection_update();                        // keeps eased moves running
+    digitalWrite(LED_PIN, (millis() / 500) & 1);
 
     if (!Serial.available()) return;
+    String line = Serial.readStringUntil('\n');
+    line.trim();
+    line.toLowerCase();
+    if (line.length() == 0) return;
 
-    char c = Serial.peek();
-    if (isDigit(c))
+    int sp = line.indexOf(' ');
+    String key = sp < 0 ? line : line.substring(0, sp);
+    String arg = sp < 0 ? "" : line.substring(sp + 1);
+    CraneTuning &t = collection_tuning();
+
+    if (key == "j" && arg.length() > 0) { jogTo(arg.toInt()); return; }
+    if (key == "save")
     {
-        long v = Serial.parseInt();
-        flushInput();
-        if (v >= 0 && v <= 180) goAngle((int)v);
-        else if (v >= 500 && v <= 2500)
-        {
-            if (!bigServo.attached()) bigServo.attach(BIG_SERVO, SERVO_MIN_US, SERVO_MAX_US);
-            bigServo.writeMicroseconds((int)v);
-            Serial.print(F("[servo] writeMicroseconds("));
-            Serial.print(v);
-            Serial.println(F(")"));
-        }
-        else Serial.println(F("out of range: 0-180 deg or 500-2500 us"));
+        int a = collection_arm_angle();
+        if      (arg == "p") t.pickupAngle = a;
+        else if (arg == "d") t.dropAngle   = a;
+        else if (arg == "r") t.restAngle   = a;
+        else { Serial.println(F("use: save p | save d | save r")); return; }
+        Serial.print(F("[save] "));
+        Serial.print(arg == "p" ? "pickup" : arg == "d" ? "drop" : "rest");
+        Serial.print(F(" angle = ")); Serial.print(a);
+        Serial.println(F(" deg  ('s' to print for config.h)"));
         return;
     }
 
-    Serial.read();
-    flushInput();
-    switch (c)
+    if (arg.length() > 0)
     {
-        case '?': case 'h': printMenu(); break;
-        case 'c': if (collectionCycle()) { flushInput(); Serial.println(F("[cycle] aborted")); } break;
-        case 'l':
-        {
-            int n = 0;
-            Serial.println(F("[loop] running cycles - press any key to stop"));
-            while (!collectionCycle())
-            {
-                Serial.print(F("[loop] cycles completed: "));
-                Serial.println(++n);
-            }
-            flushInput();
-            Serial.print(F("[loop] stopped after "));
-            Serial.print(n);
-            Serial.println(F(" full cycles"));
-            break;
-        }
-        case 'r': goAngle(AT_REST); break;
-        case 'p': goAngle(PICKUP_ANGLE); break;
-        case 'd': easedDropRamp(); break;
-        case 's': slowSweep(); flushInput(); break;
-        case 'x': bigServo.detach(); Serial.println(F("[servo] detached - no pulses, should be limp")); break;
-        case 'a':
-            bigServo.attach(BIG_SERVO, SERVO_MIN_US, SERVO_MAX_US);
-            goAngle(lastAngle);
-            break;
-        case '\r': case '\n': case ' ': break;
-        default: Serial.print(F("unknown command '")); Serial.print(c); Serial.println(F("' - '?' for menu")); break;
+        if (!setValue(key, arg.toFloat())) Serial.println(F("unknown setting - '?' for menu"));
+        return;
     }
+
+    if      (key == "+")  jogTo(collection_arm_angle() + 1);
+    else if (key == "-")  jogTo(collection_arm_angle() - 1);
+    else if (key == "++") jogTo(collection_arm_angle() + 5);
+    else if (key == "--") jogTo(collection_arm_angle() - 5);
+    else if (key == "?" || key == "h") printMenu();
+    else if (key == "s") printSettings();
+    else if (key == "c")
+    {
+        if (runCycle()) { while (Serial.available()) Serial.read(); Serial.println(F("[cycle] stopped watching - the crane finishes the cycle on its own")); }
+    }
+    else if (key == "l")
+    {
+        int n = 0;
+        Serial.println(F("[loop] running cycles - press Enter to stop"));
+        while (!runCycle()) Serial.printf("[loop] cycles completed: %d\n", ++n);
+        while (Serial.available()) Serial.read();
+        Serial.printf("[loop] stopped after %d full cycles\n", n);
+    }
+    else if (key == "p") moveAndWait(t.pickupAngle, t.pickupDps, "pickup");
+    else if (key == "d") moveAndWait(t.dropAngle,   t.dropDps,   "drop");
+    else if (key == "r") moveAndWait(t.restAngle,   t.restDps,   "rest");
+    else if (key == "m")
+    {
+        magnetsOn = !magnetsOn;
+        collection_magnets(magnetsOn);
+        Serial.println(magnetsOn ? F("[mag] ON") : F("[mag] OFF"));
+    }
+    else Serial.println(F("unknown command - '?' for menu"));
 }
 
 #endif // SERVO_TEST

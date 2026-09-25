@@ -264,6 +264,27 @@ const int   ONE_SIDE_ARC_PCT   = 16;
 // level), suppress re-detecting the same spot so we don't loop on it.
 const unsigned long TARGET_SUPPRESS_MS = 1500;
 
+// ---------------------------------------------------------------------------
+// CRANE (collection.cpp)  -  angles in degrees, speeds in degrees/second.
+// Tuned by the partner on the robot 2026-09-24:
+//   pickup 120 @ 45 deg/s - slower avoids the arm swinging inconsistently
+//                           as it comes down onto the weight
+//   drop    40 @ 60 deg/s - middle ground carrying the weight to storage;
+//                           40 drops it cleanly onto the ramp
+// All six can be changed live on the bench: pio run -e servotest (see
+// servo_test.cpp), then paste the printed values back here.
+// ---------------------------------------------------------------------------
+const int   CRANE_PICKUP_ANGLE = 118;   // confirmed with a weight 2026-09-25 (less stall than 120, which is the fallback)
+const float CRANE_PICKUP_DPS   = 45.0f;
+const int   CRANE_DROP_ANGLE   = 40;
+const float CRANE_DROP_DPS     = 60.0f;
+const int   CRANE_REST_ANGLE   = 70;     // rest angle + speed confirmed by the partner 2026-09-25
+const float CRANE_REST_DPS     = 100.0f;
+
+// eased servo moves (smooth_servo.cpp) - used by the crane
+const unsigned long SERVO_MIN_MOVE_MS     = 150;  // floor for tiny moves
+const unsigned long SERVO_STEP_INTERVAL_MS = 15;  // angle update period during a move
+
 // a full crane cycle is ~4.6s (SERVODELAY1+2 + DROP + SERVODELAY3); give up
 // waiting after this so a stuck crane can't park the robot for the round
 const unsigned long PICKUP_TIMEOUT_MS = 8000;

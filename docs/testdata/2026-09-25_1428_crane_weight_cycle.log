@@ -1,0 +1,10 @@
+0.11s  [collection] START -> PICKUP
+0.11s  [collection] PICKUP: servo -> 118 deg @ 45 deg/s, magnets ON  (dwell 1200ms)
+1.29s  [collection] PICKUP -> MOVE_TO_DROP
+1.29s  [collection] MOVE_TO_DROP: easing 118 -> 40 deg @ 60 deg/s  (dwell 900ms)
+2.58s  [collection] MOVE_TO_DROP -> DROP
+2.58s  [collection] DROP: magnets OFF  (dwell 1000ms)
+3.53s  waiting at end[collection] DROP -> FINISHED
+3.53s  [collection] FINISHED: servo -> 70 deg (rest)  (dwell 1500ms)
+5.02s  [collection] FINISHED -> IDLE
+5.02s  [cycle] done in 5005 ms

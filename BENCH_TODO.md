@@ -22,11 +22,13 @@ Work top to bottom. 🤖 = Claude can do it from the laptop once the Teensy is p
 - [ ] Check the tracks turn the right way: motor 1 = left, motor 2 = right.
 
 ## 2. Crane (with the partner)
-- [ ] Watch the first cycles: the arm should now really go to 110° for pickup and park at 70°.
-- [ ] If weights don't release cleanly, raise `WEIGHTDROPDELAY` above 1000.
+- [x] Smooth eased moves integrated (`smooth_servo.cpp`), crane angles/speeds in `config.h`
+      (done 25/9: pickup 118° @ 45°/s, drop 40° @ 60°/s, rest 70° @ 100°/s, full cycle ≈5 s).
+- [x] Weightless position check + full cycle with a real weight: grips and drops cleanly.
+- [ ] Watch for servo heat / buzzing after repeated pickups (`l` in servotest); use 120° if 118° misses.
 - [ ] Add the 514 servo isolator board if the arm takes knocks (a knock can reset the CPU).
 
-## 3. On the floor
+## 3. On the floor  (waiting on a printed part to improve motion)
 - [ ] Obstacle avoidance on its own. `x` kills the motors.
 - [ ] Approach + pickup on a single weight.
 - [ ] Tune `SIDE_NEAR_MM` (side IR, currently 150) against a red wall.
