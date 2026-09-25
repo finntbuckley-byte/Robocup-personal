@@ -200,7 +200,7 @@ The full connector-to-pin tables and module notes are in `docs/Parts_Summary_202
 | `funnel_sensor.cpp/.h` | Funnel presence (from the weight-detect ToF) + inductive sorting |
 | `weight_detect.cpp/.h` | Weight candidate: a bottom ToF return with no matching 8×8 obstacle on that side |
 | `navigation.cpp/.h` | Top-level navigation FSM, updated for the 8×8 |
-| `gate.cpp/.h` | Herkulex rear-flap (gate) servo |
+| `gate.cpp/.h` | Herkulex rear-flap (gate) servo. **Only for releasing weights at the home base**, not for sorting. Its logic waits until IMU homing + distance estimation exist |
 | `nav_test.cpp` | Drive/nav bring-up rig with the current sensor layout (commented out, `navtest` env disabled) |
 | `wire_finder.cpp` | `wirefind` env: I2C, mux, XSHUT and port discovery, drives no actuators |
 | `servo_test.cpp` | `servotest` env: crane servo bench test |
@@ -315,7 +315,9 @@ normalised values, for colour-sensor data.
 5. Round strategy: the target cap and 120 s timer are done (`round.cpp`). The time-based
    return-to-base trigger is ready but switched off (`USE_HOMING 0`) until homing exists.
    The GO button still needs wiring (`PIN_GO`).
-6. Wire up the drive encoders through the encoder IO board to give homing odometry alongside the IMU heading.
+6. **Distance travelled** for homing: either the drive-motor encoders (via the encoder IO
+   board) or the magnitude of the PMW3901 optical-flow "XY" sensor (SPI, RAW SPI CON53).
+   Homing = IMU heading + this distance estimate. Decision pending (2026-09-25).
 7. ~~Gold Sphero colour calibration~~: no longer needed, since the colour sensor was dropped.
 8. Collect report data: sorting/collection accuracy, speed, battery, obstacle-avoidance
    success rate.
@@ -330,6 +332,7 @@ Code changes often feed the DPR, so keep the firmware's documented status accura
 - FTA reinforces claims already in the report; doesn't introduce new ones.
 - Current DPR has an FTA with five sub-trees (top-level, collection, sorting/storage,
   locomotion, navigation), Figures 1–5, Appendices A–E.
+- **FSM and software block diagrams are deferred until after the competition** (team decision 2026-09-25).
 - Still needed from the team: robot photos/CAD renders, sorting + collection accuracy
   data, speed and battery figures, obstacle-avoidance success rate, CDR requirements table,
   **FSM and software block diagrams**, engineering drawings, per-member AI Use Declaration.

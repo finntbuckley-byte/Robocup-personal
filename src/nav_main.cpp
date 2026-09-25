@@ -56,7 +56,7 @@ static bool telemetryOn = true;
 
 static void printTelemetryHeader()
 {
-  Serial.println("ms\tround\tmode\tBL\tBR\tUP\tREAR\tX8L\tX8R\tIRL\tIRR\tfun\tind\tW\tpicks\treal\tdummy\tdrvL\tdrvR\tgoD\tgoA");
+  Serial.println("ms\tround\tmode\tBL\tBR\tUP\tREAR\tX8L\tX8R\tIRL\tIRR\tfun\tind\tW\tpicks\treal\tdummy\tonb\trej\tdrvL\tdrvR\tgoD\tgoA");
 }
 
 static void printTelemetry()
@@ -89,6 +89,8 @@ static void printTelemetry()
   Serial.print(pickupAttempts);         Serial.print('\t');
   Serial.print(realWeightCount);        Serial.print('\t');
   Serial.print(dummyCount);             Serial.print('\t');
+  Serial.print(targetsOnBoard());       Serial.print('\t');
+  Serial.print(rejectedCount());        Serial.print('\t');
   Serial.print(lastDriveLeftPct());     Serial.print('\t');
   Serial.print(lastDriveRightPct());    Serial.print('\t');
   // raw GO pin, digital + 10-bit analog - bring-up diagnostic

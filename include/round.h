@@ -21,7 +21,8 @@ bool roundJustStarted();          // true for exactly one roundUpdate() tick
 
 unsigned long roundElapsedMs();   // 0 until started
 
-int  targetsOnBoard();            // metal-classified weights not yet delivered
+int  targetsOnBoard();            // successful pickups not yet delivered
+void noteCollected();             // navigation: a pickup succeeded
 void noteDelivered(int n);        // for the (future) DELIVER state
 
 // false once the cap is reached or it's late in the round - navigation

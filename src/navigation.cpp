@@ -7,6 +7,7 @@
 #include "weight_detect.h"
 #include "collection.h"
 #include "round.h"
+#include "funnel_sensor.h"   // inductiveMetalNow()
 
 // ============================================================================
 //  navigation.cpp  -  built only by [env:nav] (see platformio.ini).
@@ -27,14 +28,23 @@
 //  is UNKNOWN: FORWARD crawls at BLIND_SPEED_PCT with the side IR nudge only,
 //  turns end on time, and no weight candidates are reported.
 //
-//  PICKUP:
-//      APPROACH  close at APPROACH_SPEED_PCT, PD-centring the weight
-//      PICKUP    weight inside PICKUP_TRIGGER_MM -> STOP, collection_start()
-//                once, hold still while collection_busy(), then move on
-//                (or give up after PICKUP_TIMEOUT_MS). The grab can't be
-//                confirmed here - funnel_sensor.cpp classifies what actually
-//                arrives - so the spot is suppressed afterwards either way.
-//      REPOSITION  turn away from the spot just worked, then resume.
+//  PICKUP - triggered by the INDUCTIVE sensor (front-on at the notch, 40mm
+//  up; only reads metal when steel is within ~7mm = weight seated in the
+//  notch). Bench data 2026-09-25: steel upright -> metal; plain plastic,
+//  steel lying -> not metal. So one check = "real weight, in position".
+//      APPROACH  steer on the bottom ToF pair (PD when both see it, else a
+//                one-sided arc). They see a weight from ~14cm out but lose it
+//                as it enters the notch, so:
+//      CREEP     weight lost while close (< CREEP_START_MM) -> creep
+//                straight through the blind gap for up to CREEP_MAX_MS.
+//      PICKUP    inductive reads metal (debounced) in APPROACH or CREEP ->
+//                STOP, run the crane, hold while collection_busy(). After the
+//                cycle: metal GONE from the notch = success (noteCollected);
+//                metal STILL there = the grab missed -> retry up to
+//                MAX_PICKUP_TRIES, then give up.
+//      REJECT    creep ended with no metal (dummy / lying weight / nothing)
+//                -> reverse REJECT_REVERSE_MS, pivot away, suppress the spot.
+//      REPOSITION  after a pickup, turn away from the spot, then resume.
 //
 //  ROUND (round.h): weights are only approached while roundWantsWeights() -
 //  i.e. under the 3-target cap and before RETURN_HOME_AT_MS. After that the
@@ -56,6 +66,8 @@ const int MODE_APPROACH   = 4;
 const int MODE_PICKUP     = 5;
 const int MODE_REPOSITION = 6;
 const int MODE_SCAN       = 7;
+const int MODE_CREEP      = 8;
+const int MODE_REJECT     = 9;
 
 static int mode = MODE_FORWARD;
 static unsigned long modeStart = 0;
@@ -71,8 +83,24 @@ static float approachErrPrev = 0;
 static int scanDir = 1;
 static int repositionDir = 1;
 static bool pickupStarted = false;
+static int  pickupTries = 0;
+static uint16_t lastWeightDist = 0;   // last distance the bottom pair saw the candidate at
+static int  lastWeightSide = 0;
+static int  rejectDir = 1;
+static int  rejectCount = 0;
+static unsigned long metalSince = 0;
 
 static void setMode(int m) { mode = m; modeStart = millis(); }
+
+// inductive reads metal continuously for INDUCTIVE_CONFIRM_MS
+static bool metalConfirmed()
+{
+  if (!inductiveMetalNow()) { metalSince = 0; return false; }
+  if (metalSince == 0) metalSince = millis();
+  return millis() - metalSince >= INDUCTIVE_CONFIRM_MS;
+}
+
+int rejectedCount() { return rejectCount; }
 
 const char* modeName()
 {
@@ -85,6 +113,8 @@ const char* modeName()
     case MODE_APPROACH:   return "APPROACH";
     case MODE_PICKUP:     return "PICKUP";
     case MODE_REPOSITION: return "REPOSITION";
+    case MODE_CREEP:      return "CREEP";
+    case MODE_REJECT:     return "REJECT";
     default:              return "SCAN";
   }
 }
@@ -140,7 +170,38 @@ static void startApproach()
 {
   lastFindOrEvent = millis();
   approachErrPrev = 0;
+  lastWeightDist = 0;
   setMode(MODE_APPROACH);
+}
+
+static void startPickup()
+{
+  repositionDir = (lastWeightSide < 0) ? +1 : -1;   // peel away from its side
+  pickupStarted = false;
+  setMode(MODE_PICKUP);
+}
+
+static void startReject()
+{
+  rejectCount++;
+  rejectDir = (lastWeightSide < 0) ? +1 : -1;
+  Serial.print(">>> REJECT #"); Serial.print(rejectCount);
+  Serial.println(" - no metal at the notch (dummy / lying weight / nothing)");
+  setMode(MODE_REJECT);
+}
+
+// walls outrank prizes: returns true if it switched to a turn/escape
+static bool avoidIfBlocked()
+{
+  if (!obstacleLeft() && !obstacleRight()) return false;
+  if (obstacleLeft() && obstacleRight())
+  {
+    escapeSpinDir = roomierSide();
+    escapeSpinMs  = ESCAPE_SPIN_MS;
+    setMode(MODE_ESCAPE);
+  }
+  else requestTurn(obstacleLeft() ? +1 : -1);
+  return true;
 }
 
 void navigationInit()
@@ -168,7 +229,9 @@ void navigationUpdate()
   {
     case MODE_FORWARD:
     {
-      if (obstacleLeft() && obstacleRight())
+      // a weight can end up in the notch without an approach (drove into it)
+      if (wantWeights && metalConfirmed()) { pickupTries = 0; lastWeightSide = 0; startPickup(); }
+      else if (obstacleLeft() && obstacleRight())
       {
         escapeSpinDir = roomierSide();
         escapeSpinMs  = ESCAPE_SPIN_MS;
@@ -228,7 +291,8 @@ void navigationUpdate()
       break;
 
     case MODE_SCAN:
-      if (wantWeights && weightFound) startApproach();
+      if (wantWeights && metalConfirmed()) { pickupTries = 0; lastWeightSide = 0; startPickup(); }
+      else if (wantWeights && weightFound) startApproach();
       else if (held > SCAN_MAX_MS || obstacleLeft() || obstacleRight() || !wantWeights)
       {
         lastFindOrEvent = millis();
@@ -238,50 +302,73 @@ void navigationUpdate()
 
     case MODE_APPROACH:
     {
-      if (obstacleLeft() || obstacleRight())        // walls outrank prizes
-      {
-        if (obstacleLeft() && obstacleRight())
-        {
-          escapeSpinDir = roomierSide();
-          escapeSpinMs  = ESCAPE_SPIN_MS;
-          setMode(MODE_ESCAPE);
-        }
-        else requestTurn(obstacleLeft() ? +1 : -1);
-        break;
-      }
-
+      if (avoidIfBlocked()) break;
       if (!wantWeights) { setMode(MODE_FORWARD); break; }
 
-      if (weightFound && weightDistMM > 0 && weightDistMM < PICKUP_TRIGGER_MM)
-      {
-        repositionDir = (weightSide < 0) ? +1 : -1;   // peel away from its side
-        pickupStarted = false;
-        setMode(MODE_PICKUP);
-        break;
-      }
+      if (metalConfirmed()) { pickupTries = 0; startPickup(); break; }
 
-      if (!weightFound && held > 400)
-        setMode(MODE_FORWARD);
+      if (weightFound)
+      {
+        lastWeightDist = weightDistMM;
+        lastWeightSide = weightSide;
+      }
+      else if (lastWeightDist > 0 && lastWeightDist < CREEP_START_MM)
+      {
+        setMode(MODE_CREEP);            // lost it at the notch mouth - creep through the blind gap
+      }
+      else if (held > 400)
+        setMode(MODE_FORWARD);          // lost it far out - give up
       break;
     }
+
+    case MODE_CREEP:
+      if (avoidIfBlocked()) break;
+      if (!wantWeights) { setMode(MODE_FORWARD); break; }
+      if (metalConfirmed()) { pickupTries = 0; startPickup(); }
+      else if (weightFound && weightDistMM >= CREEP_START_MM) startApproach();   // re-acquired further out
+      else if (held > CREEP_MAX_MS) startReject();
+      break;
 
     case MODE_PICKUP:
       if (!pickupStarted)
       {
         collection_start();      // partner's crane/magnet FSM
         pickupStarted = true;
+        pickupTries++;
       }
       else if (!collection_busy() || held > PICKUP_TIMEOUT_MS)
       {
         pickupAttempts++;
+        bool timedOut = held > PICKUP_TIMEOUT_MS;
+        bool stillThere = inductiveMetalNow();   // metal still in the notch = the grab missed
+
         Serial.print(">>> PICKUP ATTEMPT #"); Serial.print(pickupAttempts);
-        Serial.println(held > PICKUP_TIMEOUT_MS ? " (TIMED OUT waiting for crane)" : "");
-        // can't confirm the grab from here (a dummy won't be attracted to
-        // the magnets) - suppress regardless so we don't loop on this spot
+        if (timedOut)        Serial.println(" - TIMED OUT waiting for crane");
+        else if (stillThere) Serial.println(" - MISSED (metal still in the notch)");
+        else                 Serial.println(" - OK (weight gone from the notch)");
+
+        if (!timedOut && stillThere && pickupTries < MAX_PICKUP_TRIES)
+        {
+          pickupStarted = false;          // retry in place
+          modeStart = millis();
+          break;
+        }
+        if (!timedOut && !stillThere) noteCollected();
+
         suppressTargetFor(TARGET_SUPPRESS_MS);
         lastFindOrEvent = millis();
         lastTurn = 0; flipCount = 0;
         setMode(MODE_REPOSITION);
+      }
+      break;
+
+    case MODE_REJECT:
+      if (held > REJECT_REVERSE_MS + REPOSITION_TURN_MS)
+      {
+        suppressTargetFor(REJECT_SUPPRESS_MS);
+        lastFindOrEvent = millis();
+        lastTurn = 0; flipCount = 0;
+        setMode(MODE_FORWARD);
       }
       break;
 
@@ -343,8 +430,21 @@ void navigationUpdate()
       break;
     }
 
+    case MODE_CREEP:
+      drive(CREEP_SPEED_PCT, CREEP_SPEED_PCT);   // straight - nothing to steer on in the blind gap
+      break;
+
     case MODE_PICKUP:
       stopMotors();     // hold still while the crane works
+      break;
+
+    case MODE_REJECT:
+      // back out of the notch (rear guard below still applies), then pivot
+      // away so the V-notch wall pushes the dummy aside (option C)
+      if (held < REJECT_REVERSE_MS)
+        drive(-REJECT_REVERSE_PCT, -REJECT_REVERSE_PCT);
+      else
+        drive(rejectDir * REPOSITION_SPEED_PCT, -rejectDir * REPOSITION_SPEED_PCT);
       break;
 
     case MODE_REPOSITION:

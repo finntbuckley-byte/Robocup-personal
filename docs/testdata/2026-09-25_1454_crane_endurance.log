@@ -1,0 +1,303 @@
+    0.1s  [loop] running cycles - press Enter to stop
+    0.1s  [collection] START -> PICKUP
+    0.1s  [collection] PICKUP: servo -> 118 deg @ 45 deg/s, magnets ON  (dwell 1200ms)
+    1.3s  [collection] PICKUP -> MOVE_TO_DROP
+    1.3s  [collection] MOVE_TO_DROP: easing 118 -> 40 deg @ 60 deg/s  (dwell 900ms)
+    2.6s  [collection] MOVE_TO_DROP -> DROP
+    2.6s  [collection] DROP: at drop point, magnets off in 1000ms
+    3.6s  [collection] DROP: magnets OFF - weight released
+    3.6s  [collection] DROP -> FINISHED
+    3.6s  [collection] FINISHED: servo -> 70 deg (rest)  (dwell 1500ms)
+    5.1s  [collection] FINISHED -> IDLE
+    5.1s  [cycle] done in 5005 ms
+    5.1s  [loop] cycles completed: 1
+    5.1s  [collection] START -> PICKUP
+    5.1s  [collection] PICKUP: servo -> 118 deg @ 45 deg/s, magnets ON  (dwell 1200ms)
+    6.3s  [collection] PICKUP -> MOVE_TO_DROP
+    6.3s  [collection] MOVE_TO_DROP: easing 118 -> 40 deg @ 60 deg/s  (dwell 900ms)
+    7.6s  [collection] MOVE_TO_DROP -> DROP
+    7.6s  [collection] DROP: at drop point, magnets off in 1000ms
+    8.6s  [collection] DROP: magnets OFF - weight released
+    8.6s  [collection] DROP -> FINISHED
+    8.6s  [collection] FINISHED: servo -> 70 deg (rest)  (dwell 1500ms)
+   10.1s  [collection] FINISHED -> IDLE
+   10.1s  [cycle] done in 5005 ms
+   10.1s  [loop] cycles completed: 2
+   10.1s  [collection] START -> PICKUP
+   10.1s  [collection] PICKUP: servo -> 118 deg @ 45 deg/s, magnets ON  (dwell 1200ms)
+   11.3s  [collection] PICKUP -> MOVE_TO_DROP
+   11.3s  [collection] MOVE_TO_DROP: easing 118 -> 40 deg @ 60 deg/s  (dwell 900ms)
+   12.6s  [collection] MOVE_TO_DROP -> DROP
+   12.6s  [collection] DROP: at drop point, magnets off in 1000ms
+   13.6s  [collection] DROP: magnets OFF - weight released
+   13.6s  [collection] DROP -> FINISHED
+   13.6s  [collection] FINISHED: servo -> 70 deg (rest)  (dwell 1500ms)
+   15.1s  [collection] FINISHED -> IDLE
+   15.1s  [cycle] done in 5005 ms
+   15.1s  [loop] cycles completed: 3
+   15.1s  [collection] START -> PICKUP
+   15.1s  [collection] PICKUP: servo -> 118 deg @ 45 deg/s, magnets ON  (dwell 1200ms)
+   16.3s  [collection] PICKUP -> MOVE_TO_DROP
+   16.3s  [collection] MOVE_TO_DROP: easing 118 -> 40 deg @ 60 deg/s  (dwell 900ms)
+   17.6s  [collection] MOVE_TO_DROP -> DROP
+   17.6s  [collection] DROP: at drop point, magnets off in 1000ms
+   18.6s  [collection] DROP: magnets OFF - weight released
+   18.6s  [collection] DROP -> FINISHED
+   18.6s  [collection] FINISHED: servo -> 70 deg (rest)  (dwell 1500ms)
+   20.1s  [collection] FINISHED -> IDLE
+   20.1s  [cycle] done in 5005 ms
+   20.1s  [loop] cycles completed: 4
+   20.1s  [collection] START -> PICKUP
+   20.1s  [collection] PICKUP: servo -> 118 deg @ 45 deg/s, magnets ON  (dwell 1200ms)
+   21.3s  [collection] PICKUP -> MOVE_TO_DROP
+   21.3s  [collection] MOVE_TO_DROP: easing 118 -> 40 deg @ 60 deg/s  (dwell 900ms)
+   22.6s  [collection] MOVE_TO_DROP -> DROP
+   22.6s  [collection] DROP: at drop point, magnets off in 1000ms
+   23.6s  [collection] DROP: magnets OFF - weight released
+   23.6s  [collection] DROP -> FINISHED
+   23.6s  [collection] FINISHED: servo -> 70 deg (rest)  (dwell 1500ms)
+   25.1s  [collection] FINISHED -> IDLE
+   25.1s  [cycle] done in 5005 ms
+   25.1s  [loop] cycles completed: 5
+   25.1s  [collection] START -> PICKUP
+   25.1s  [collection] PICKUP: servo -> 118 deg @ 45 deg/s, magnets ON  (dwell 1200ms)
+   26.3s  [collection] PICKUP -> MOVE_TO_DROP
+   26.3s  [collection] MOVE_TO_DROP: easing 118 -> 40 deg @ 60 deg/s  (dwell 900ms)
+   27.6s  [collection] MOVE_TO_DROP -> DROP
+   27.6s  [collection] DROP: at drop point, magnets off in 1000ms
+   28.6s  [collection] DROP: magnets OFF - weight released
+   28.6s  [collection] DROP -> FINISHED
+   28.6s  [collection] FINISHED: servo -> 70 deg (rest)  (dwell 1500ms)
+   30.1s  [collection] FINISHED -> IDLE
+   30.1s  [cycle] done in 5005 ms
+   30.1s  [loop] cycles completed: 6
+   30.1s  [collection] START -> PICKUP
+   30.1s  [collection] PICKUP: servo -> 118 deg @ 45 deg/s, magnets ON  (dwell 1200ms)
+   31.3s  [collection] PICKUP -> MOVE_TO_DROP
+   31.3s  [collection] MOVE_TO_DROP: easing 118 -> 40 deg @ 60 deg/s  (dwell 900ms)
+   32.6s  [collection] MOVE_TO_DROP -> DROP
+   32.6s  [collection] DROP: at drop point, magnets off in 1000ms
+   33.6s  [collection] DROP: magnets OFF - weight released
+   33.6s  [collection] DROP -> FINISHED
+   33.6s  [collection] FINISHED: servo -> 70 deg (rest)  (dwell 1500ms)
+   35.1s  [collection] FINISHED -> IDLE
+   35.1s  [cycle] done in 5005 ms
+   35.1s  [loop] cycles completed: 7
+   35.1s  [collection] START -> PICKUP
+   35.1s  [collection] PICKUP: servo -> 118 deg @ 45 deg/s, magnets ON  (dwell 1200ms)
+   36.3s  [collection] PICKUP -> MOVE_TO_DROP
+   36.3s  [collection] MOVE_TO_DROP: easing 118 -> 40 deg @ 60 deg/s  (dwell 900ms)
+   37.6s  [collection] MOVE_TO_DROP -> DROP
+   37.6s  [collection] DROP: at drop point, magnets off in 1000ms
+   38.6s  [collection] DROP: magnets OFF - weight released
+   38.6s  [collection] DROP -> FINISHED
+   38.6s  [collection] FINISHED: servo -> 70 deg (rest)  (dwell 1500ms)
+   40.0s  [collection] FINISHED -> IDLE
+   40.0s  [cycle] done in 5005 ms
+   40.0s  [loop] cycles completed: 8
+   40.0s  [collection] START -> PICKUP
+   40.0s  [collection] PICKUP: servo -> 118 deg @ 45 deg/s, magnets ON  (dwell 1200ms)
+   41.3s  [collection] PICKUP -> MOVE_TO_DROP
+   41.3s  [collection] MOVE_TO_DROP: easing 118 -> 40 deg @ 60 deg/s  (dwell 900ms)
+   42.5s  [collection] MOVE_TO_DROP -> DROP
+   42.5s  [collection] DROP: at drop point, magnets off in 1000ms
+   43.6s  [collection] DROP: magnets OFF - weight released
+   43.6s  [collection] DROP -> FINISHED
+   43.6s  [collection] FINISHED: servo -> 70 deg (rest)  (dwell 1500ms)
+   45.1s  [collection] FINISHED -> IDLE
+   45.1s  [cycle] done in 5005 ms
+   45.1s  [loop] cycles completed: 9
+   45.1s  [collection] START -> PICKUP
+   45.1s  [collection] PICKUP: servo -> 118 deg @ 45 deg/s, magnets ON  (dwell 1200ms)
+   46.3s  [collection] PICKUP -> MOVE_TO_DROP
+   46.3s  [collection] MOVE_TO_DROP: easing 118 -> 40 deg @ 60 deg/s  (dwell 900ms)
+   47.6s  [collection] MOVE_TO_DROP -> DROP
+   47.6s  [collection] DROP: at drop point, magnets off in 1000ms
+   48.6s  [collection] DROP: magnets OFF - weight released
+   48.6s  [collection] DROP -> FINISHED
+   48.6s  [collection] FINISHED: servo -> 70 deg (rest)  (dwell 1500ms)
+   50.1s  [collection] FINISHED -> IDLE
+   50.1s  [cycle] done in 5005 ms
+   50.1s  [loop] cycles completed: 10
+   50.1s  [collection] START -> PICKUP
+   50.1s  [collection] PICKUP: servo -> 118 deg @ 45 deg/s, magnets ON  (dwell 1200ms)
+   51.3s  [collection] PICKUP -> MOVE_TO_DROP
+   51.3s  [collection] MOVE_TO_DROP: easing 118 -> 40 deg @ 60 deg/s  (dwell 900ms)
+   52.6s  [collection] MOVE_TO_DROP -> DROP
+   52.6s  [collection] DROP: at drop point, magnets off in 1000ms
+   53.6s  [collection] DROP: magnets OFF - weight released
+   53.6s  [collection] DROP -> FINISHED
+   53.6s  [collection] FINISHED: servo -> 70 deg (rest)  (dwell 1500ms)
+   55.1s  [collection] FINISHED -> IDLE
+   55.1s  [cycle] done in 5005 ms
+   55.1s  [loop] cycles completed: 11
+   55.1s  [collection] START -> PICKUP
+   55.1s  [collection] PICKUP: servo -> 118 deg @ 45 deg/s, magnets ON  (dwell 1200ms)
+   56.4s  [collection] PICKUP -> MOVE_TO_DROP
+   56.4s  [collection] MOVE_TO_DROP: easing 118 -> 40 deg @ 60 deg/s  (dwell 900ms)
+   57.6s  [collection] MOVE_TO_DROP -> DROP
+   57.6s  [collection] DROP: at drop point, magnets off in 1000ms
+   58.7s  [collection] DROP: magnets OFF - weight released
+   58.7s  [collection] DROP -> FINISHED
+   58.7s  [collection] FINISHED: servo -> 70 deg (rest)  (dwell 1500ms)
+   60.1s  [collection] FINISHED -> IDLE
+   60.1s  [cycle] done in 5005 ms
+   60.1s  [loop] cycles completed: 12
+   60.1s  [collection] START -> PICKUP
+   60.1s  [collection] PICKUP: servo -> 118 deg @ 45 deg/s, magnets ON  (dwell 1200ms)
+   61.3s  [collection] PICKUP -> MOVE_TO_DROP
+   61.3s  [collection] MOVE_TO_DROP: easing 118 -> 40 deg @ 60 deg/s  (dwell 900ms)
+   62.6s  [collection] MOVE_TO_DROP -> DROP
+   62.6s  [collection] DROP: at drop point, magnets off in 1000ms
+   63.7s  [collection] DROP: magnets OFF - weight released
+   63.7s  [collection] DROP -> FINISHED
+   63.7s  [collection] FINISHED: servo -> 70 deg (rest)  (dwell 1500ms)
+   65.1s  [collection] FINISHED -> IDLE
+   65.1s  [cycle] done in 5005 ms
+   65.1s  [loop] cycles completed: 13
+   65.1s  [collection] START -> PICKUP
+   65.1s  [collection] PICKUP: servo -> 118 deg @ 45 deg/s, magnets ON  (dwell 1200ms)
+   66.3s  [collection] PICKUP -> MOVE_TO_DROP
+   66.3s  [collection] MOVE_TO_DROP: easing 118 -> 40 deg @ 60 deg/s  (dwell 900ms)
+   67.6s  [collection] MOVE_TO_DROP -> DROP
+   67.6s  [collection] DROP: at drop point, magnets off in 1000ms
+   68.6s  [collection] DROP: magnets OFF - weight released
+   68.6s  [collection] DROP -> FINISHED
+   68.6s  [collection] FINISHED: servo -> 70 deg (rest)  (dwell 1500ms)
+   70.1s  [collection] FINISHED -> IDLE
+   70.1s  [cycle] done in 5005 ms
+   70.1s  [loop] cycles completed: 14
+   70.1s  [collection] START -> PICKUP
+   70.1s  [collection] PICKUP: servo -> 118 deg @ 45 deg/s, magnets ON  (dwell 1200ms)
+   71.3s  [collection] PICKUP -> MOVE_TO_DROP
+   71.3s  [collection] MOVE_TO_DROP: easing 118 -> 40 deg @ 60 deg/s  (dwell 900ms)
+   72.6s  [collection] MOVE_TO_DROP -> DROP
+   72.6s  [collection] DROP: at drop point, magnets off in 1000ms
+   73.6s  [collection] DROP: magnets OFF - weight released
+   73.6s  [collection] DROP -> FINISHED
+   73.6s  [collection] FINISHED: servo -> 70 deg (rest)  (dwell 1500ms)
+   75.1s  [collection] FINISHED -> IDLE
+   75.1s  [cycle] done in 5005 ms
+   75.1s  [loop] cycles completed: 15
+   75.1s  [collection] START -> PICKUP
+   75.1s  [collection] PICKUP: servo -> 118 deg @ 45 deg/s, magnets ON  (dwell 1200ms)
+   76.3s  [collection] PICKUP -> MOVE_TO_DROP
+   76.3s  [collection] MOVE_TO_DROP: easing 118 -> 40 deg @ 60 deg/s  (dwell 900ms)
+   77.6s  [collection] MOVE_TO_DROP -> DROP
+   77.6s  [collection] DROP: at drop point, magnets off in 1000ms
+   78.7s  [collection] DROP: magnets OFF - weight released
+   78.7s  [collection] DROP -> FINISHED
+   78.7s  [collection] FINISHED: servo -> 70 deg (rest)  (dwell 1500ms)
+   80.1s  [collection] FINISHED -> IDLE
+   80.1s  [cycle] done in 5005 ms
+   80.1s  [loop] cycles completed: 16
+   80.1s  [collection] START -> PICKUP
+   80.1s  [collection] PICKUP: servo -> 118 deg @ 45 deg/s, magnets ON  (dwell 1200ms)
+   81.3s  [collection] PICKUP -> MOVE_TO_DROP
+   81.3s  [collection] MOVE_TO_DROP: easing 118 -> 40 deg @ 60 deg/s  (dwell 900ms)
+   82.6s  [collection] MOVE_TO_DROP -> DROP
+   82.6s  [collection] DROP: at drop point, magnets off in 1000ms
+   83.6s  [collection] DROP: magnets OFF - weight released
+   83.6s  [collection] DROP -> FINISHED
+   83.6s  [collection] FINISHED: servo -> 70 deg (rest)  (dwell 1500ms)
+   85.1s  [collection] FINISHED -> IDLE
+   85.1s  [cycle] done in 5005 ms
+   85.1s  [loop] cycles completed: 17
+   85.1s  [collection] START -> PICKUP
+   85.1s  [collection] PICKUP: servo -> 118 deg @ 45 deg/s, magnets ON  (dwell 1200ms)
+   86.3s  [collection] PICKUP -> MOVE_TO_DROP
+   86.3s  [collection] MOVE_TO_DROP: easing 118 -> 40 deg @ 60 deg/s  (dwell 900ms)
+   87.6s  [collection] MOVE_TO_DROP -> DROP
+   87.6s  [collection] DROP: at drop point, magnets off in 1000ms
+   88.6s  [collection] DROP: magnets OFF - weight released
+   88.6s  [collection] DROP -> FINISHED
+   88.6s  [collection] FINISHED: servo -> 70 deg (rest)  (dwell 1500ms)
+   90.1s  [collection] FINISHED -> IDLE
+   90.1s  [cycle] done in 5005 ms
+   90.1s  [loop] cycles completed: 18
+   90.1s  [collection] START -> PICKUP
+   90.1s  [collection] PICKUP: servo -> 118 deg @ 45 deg/s, magnets ON  (dwell 1200ms)
+   91.3s  [collection] PICKUP -> MOVE_TO_DROP
+   91.3s  [collection] MOVE_TO_DROP: easing 118 -> 40 deg @ 60 deg/s  (dwell 900ms)
+   92.6s  [collection] MOVE_TO_DROP -> DROP
+   92.6s  [collection] DROP: at drop point, magnets off in 1000ms
+   93.6s  [collection] DROP: magnets OFF - weight released
+   93.6s  [collection] DROP -> FINISHED
+   93.6s  [collection] FINISHED: servo -> 70 deg (rest)  (dwell 1500ms)
+   95.1s  [collection] FINISHED -> IDLE
+   95.1s  [cycle] done in 5005 ms
+   95.1s  [loop] cycles completed: 19
+   95.1s  [collection] START -> PICKUP
+   95.1s  [collection] PICKUP: servo -> 118 deg @ 45 deg/s, magnets ON  (dwell 1200ms)
+   96.3s  [collection] PICKUP -> MOVE_TO_DROP
+   96.3s  [collection] MOVE_TO_DROP: easing 118 -> 40 deg @ 60 deg/s  (dwell 900ms)
+   97.6s  [collection] MOVE_TO_DROP -> DROP
+   97.6s  [collection] DROP: at drop point, magnets off in 1000ms
+   98.6s  [collection] DROP: magnets OFF - weight released
+   98.6s  [collection] DROP -> FINISHED
+   98.6s  [collection] FINISHED: servo -> 70 deg (rest)  (dwell 1500ms)
+  100.1s  [collection] FINISHED -> IDLE
+  100.1s  [cycle] done in 5005 ms
+  100.1s  [loop] cycles completed: 20
+  100.1s  [collection] START -> PICKUP
+  100.1s  [collection] PICKUP: servo -> 118 deg @ 45 deg/s, magnets ON  (dwell 1200ms)
+  101.3s  [collection] PICKUP -> MOVE_TO_DROP
+  101.3s  [collection] MOVE_TO_DROP: easing 118 -> 40 deg @ 60 deg/s  (dwell 900ms)
+  102.6s  [collection] MOVE_TO_DROP -> DROP
+  102.6s  [collection] DROP: at drop point, magnets off in 1000ms
+  103.6s  [collection] DROP: magnets OFF - weight released
+  103.6s  [collection] DROP -> FINISHED
+  103.6s  [collection] FINISHED: servo -> 70 deg (rest)  (dwell 1500ms)
+  105.1s  [collection] FINISHED -> IDLE
+  105.1s  [cycle] done in 5005 ms
+  105.1s  [loop] cycles completed: 21
+  105.1s  [collection] START -> PICKUP
+  105.1s  [collection] PICKUP: servo -> 118 deg @ 45 deg/s, magnets ON  (dwell 1200ms)
+  106.3s  [collection] PICKUP -> MOVE_TO_DROP
+  106.3s  [collection] MOVE_TO_DROP: easing 118 -> 40 deg @ 60 deg/s  (dwell 900ms)
+  107.6s  [collection] MOVE_TO_DROP -> DROP
+  107.6s  [collection] DROP: at drop point, magnets off in 1000ms
+  108.6s  [collection] DROP: magnets OFF - weight released
+  108.6s  [collection] DROP -> FINISHED
+  108.6s  [collection] FINISHED: servo -> 70 deg (rest)  (dwell 1500ms)
+  110.2s  [collection] FINISHED -> IDLE
+  110.2s  [cycle] done in 5005 ms
+  110.2s  [loop] cycles completed: 22
+  110.2s  [collection] START -> PICKUP
+  110.2s  [collection] PICKUP: servo -> 118 deg @ 45 deg/s, magnets ON  (dwell 1200ms)
+  111.4s  [collection] PICKUP -> MOVE_TO_DROP
+  111.4s  [collection] MOVE_TO_DROP: easing 118 -> 40 deg @ 60 deg/s  (dwell 900ms)
+  112.7s  [collection] MOVE_TO_DROP -> DROP
+  112.7s  [collection] DROP: at drop point, magnets off in 1000ms
+  113.6s  [collection] DROP: magnets OFF - weight released
+  113.6s  [collection] DROP -> FINISHED
+  113.6s  [collection] FINISHED: servo -> 70 deg (rest)  (dwell 1500ms)
+  115.2s  [collection] FINISHED -> IDLE
+  115.2s  [cycle] done in 5005 ms
+  115.2s  [loop] cycles completed: 23
+  115.2s  [collection] START -> PICKUP
+  115.2s  [collection] PICKUP: servo -> 118 deg @ 45 deg/s, magnets ON  (dwell 1200ms)
+  116.4s  [collection] PICKUP -> MOVE_TO_DROP
+  116.4s  [collection] MOVE_TO_DROP: easing 118 -> 40 deg @ 60 deg/s  (dwell 900ms)
+  117.7s  [collection] MOVE_TO_DROP -> DROP
+  117.7s  [collection] DROP: at drop point, magnets off in 1000ms
+  118.6s  [collection] DROP: magnets OFF - weight released
+  118.6s  [collection] DROP -> FINISHED
+  118.6s  [collection] FINISHED: servo -> 70 deg (rest)  (dwell 1500ms)
+  120.2s  [collection] FINISHED -> IDLE
+  120.2s  [cycle] done in 5005 ms
+  120.2s  [loop] cycles completed: 24
+  120.2s  [collection] START -> PICKUP
+  120.2s  [collection] PICKUP: servo -> 118 deg @ 45 deg/s, magnets ON  (dwell 1200ms)
+  121.4s  [collection] PICKUP -> MOVE_TO_DROP
+  121.4s  [collection] MOVE_TO_DROP: easing 118 -> 40 deg @ 60 deg/s  (dwell 900ms)
+  122.7s  [collection] MOVE_TO_DROP -> DROP
+  122.7s  [collection] DROP: at drop point, magnets off in 1000ms
+  123.7s  [collection] DROP: magnets OFF - weight released
+  123.7s  [collection] DROP -> FINISHED
+  123.7s  [collection] FINISHED: servo -> 70 deg (rest)  (dwell 1500ms)
+  125.2s  [collection] FINISHED -> IDLE
+  125.2s  [cycle] done in 5005 ms
+  125.2s  [loop] cycles completed: 25
+  125.2s  [collection] START -> PICKUP
+  125.2s  [collection] PICKUP: servo -> 118 deg @ 45 deg/s, magnets ON  (dwell 1200ms)

@@ -13,10 +13,10 @@
 //  End: ROUND_MS minus ROUND_END_MARGIN_MS, so the robot is already still
 //  when the round is called and nothing is mid-motion at scoring.
 //
-//  Targets on board = weights the funnel classified as metal, minus any
-//  delivered. ASSUMPTION: every metal-classified weight stays on board
-//  (dummies are rejected by the gate/flap). TODO(verify) once the gate
-//  sorting logic exists.
+//  Targets on board = successful pickups (navigation calls noteCollected()
+//  when a crane cycle started on metal AND the metal is gone from the notch
+//  afterwards), minus any delivered. Dummies are never picked up - pickup is
+//  gated on the inductive sensor.
 // ============================================================================
 
 enum RoundPhase { PHASE_WAITING, PHASE_RUNNING, PHASE_OVER };
@@ -26,6 +26,7 @@ static unsigned long initAt = 0;
 static unsigned long startAt = 0;
 static bool justStarted = false;
 static int deliveredCount = 0;
+static int collectedCount = 0;
 
 static unsigned long goDownSince = 0;
 static unsigned long goUpSince = 0;
@@ -126,8 +127,14 @@ unsigned long roundElapsedMs()
 
 int targetsOnBoard()
 {
-  int n = realWeightCount - deliveredCount;
+  int n = collectedCount - deliveredCount;
   return n < 0 ? 0 : n;
+}
+
+void noteCollected()
+{
+  collectedCount++;
+  Serial.print(">>> TARGET COLLECTED - on board: "); Serial.println(targetsOnBoard());
 }
 
 void noteDelivered(int n) { deliveredCount += n; }

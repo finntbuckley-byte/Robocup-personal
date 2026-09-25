@@ -10,5 +10,6 @@
 void navigationInit();
 void navigationUpdate();
 const char* modeName();
+int rejectedCount();      // dummies/non-metal backed away from (telemetry)
 
 #endif /* __NAVIGATION_H */

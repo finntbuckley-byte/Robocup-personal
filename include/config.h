@@ -174,12 +174,13 @@ const int SIDE_NUDGE_PCT = 15;
 // ---------------------------------------------------------------------------
 // FUNNEL PRESENCE  -  the weight-detect ToF (TOF_UPRIGHT, CON27) across the
 // notch. Something inside this band = an object is in the funnel.
-// Measured 2026-09-25 (wirefind 't', L1X short mode): empty funnel 87-112mm,
-// weight in the funnel 52-59mm. Threshold sits in the gap.
-// TODO(verify): repeat with the weight lying down and at each side of the notch.
+// Measured 2026-09-25: empty notch 77-112mm (and up to 1.5m looking out),
+// steel upright 57-61mm, plain plastic dummy 70-74mm, steel lying = not seen.
+// 66 cleanly separates empty from steel; plastic may read "absent", which is
+// fine - presence is telemetry now, the pickup trigger is the inductive.
 // ---------------------------------------------------------------------------
 const int FUNNEL_MIN_MM     = 20;   // below this = sensor noise / blind zone
-const int FUNNEL_PRESENT_MM = 75;
+const int FUNNEL_PRESENT_MM = 66;
 
 // ---------------------------------------------------------------------------
 // INDUCTIVE SENSOR  -  metal (real weight) vs non-metal (dummy) at the
@@ -246,7 +247,23 @@ const int WEIGHT_MIN_MM        = 60;
 const int WEIGHT_MAX_MM        = 700;
 const int DIFF_CLEAR_MARGIN_MM = 250;
 const int WEIGHT_STICK_MS      = 120;
-const int PICKUP_TRIGGER_MM    = 115;   // close/aligned enough to stop + pick up
+
+// ---------------------------------------------------------------------------
+// PICKUP TRIGGER (inductive) / CREEP / REJECT  -  see navigation.cpp
+// Notch bench test 2026-09-25: bottom-left saw an upright steel weight at
+// ~139mm, but neither bottom ToF sees it once it's IN the notch, so the
+// robot creeps through that blind gap and the inductive sensor (only reads
+// metal within ~7mm) triggers the pickup.
+// TODO(verify) on the floor: creep speed/time, reverse distance.
+// ---------------------------------------------------------------------------
+const unsigned long INDUCTIVE_CONFIRM_MS = 60;    // metal must read steadily this long
+const int  CREEP_START_MM   = 200;   // candidate lost closer than this -> creep, not give up
+const int  CREEP_SPEED_PCT  = 30;
+const unsigned long CREEP_MAX_MS = 1000;   // no metal by then -> REJECT
+const int  MAX_PICKUP_TRIES = 2;     // metal still in the notch after a cycle = missed grab -> retry
+const int  REJECT_REVERSE_PCT = 40;
+const unsigned long REJECT_REVERSE_MS  = 500;    // aim ~10cm clear of the notch
+const unsigned long REJECT_SUPPRESS_MS = 4000;   // ignore that spot for this long
 
 // ---------------------------------------------------------------------------
 // PD STEERING for APPROACH (mm imbalance -> % differential)

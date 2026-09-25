@@ -25,11 +25,48 @@ Work top to bottom. 🤖 = Claude can do it from the laptop once the Teensy is p
 - [x] Smooth eased moves integrated (`smooth_servo.cpp`), crane angles/speeds in `config.h`
       (done 25/9: pickup 118° @ 45°/s, drop 40° @ 60°/s, rest 70° @ 100°/s, full cycle ≈5 s).
 - [x] Weightless position check + full cycle with a real weight: grips and drops cleanly.
-- [ ] Watch for servo heat / buzzing after repeated pickups (`l` in servotest); use 120° if 118° misses.
+- [x] Watch for servo heat / buzzing after repeated pickups (done 25/9: endurance loop on a plastic dummy, no heat).
 - [ ] Add the 514 servo isolator board if the arm takes knocks (a knock can reset the CPU).
+
+## 2b. Dummy rejection (inductive sensor at the notch, 40 mm up, front-on)
+- [ ] **Needs an insert-dummy (plastic with a steel top). None found yet.** Upright in the notch
+      it should read non-metal (the sensor sees the side, not the steel top). Also try it lying with
+      its top facing the sensor, which may false-trigger.
+- [ ] Then: pickup only if the inductive sensor reads metal; otherwise reverse about 10 cm and
+      pivot away (option C). Only design the flinger if dummies keep getting re-found.
+
+## 2c. New pickup logic (inductive trigger, CREEP / REJECT): bench tests on blocks
+Flash `nav`, robot on blocks, say go before pressing GO. 🤖 logs each one.
+- [ ] **Pickup chain:** drop a steel weight into the notch mid-round → PICKUP → crane → "OK" →
+      `onb` +1 → turns away. Repeat to 3 on board → it stops collecting.
+- [ ] **Missed grab:** hold the weight down so the magnets can't lift it → retries once, then gives up.
+- [ ] **CREEP → REJECT:** hold a weight ~14 cm ahead of the bottom-left ToF, then pull it away →
+      creep, no metal, reverse + pivot. Hand behind the robot during the reverse → rear guard stops it.
+- [ ] **Full 2-min round, hands off:** stops itself at ~118.5 s, no hang, no reset (`ms` never jumps
+      back to 0). With a pickup in it, this also checks crane + both tracks together don't brown out.
+
+## 2d. Third weight carried on the magnet (held at rest, not dropped)
+- [x] Magnet coils **do get hot** in extended use (partner, from earlier testing), so a full-power
+      hold for ~100 s isn't safe. Plan: full power to grab, then a **reduced PWM holding level**.
+- [ ] **Move the magnets to PWM pins.** Pins 26/27 (CON74/75) have **no PWM** on the Teensy 4.0
+      (confirmed from the core's pwm.c). Move to **CON72 (A10Z, pin 24)** and **CON73 (A11Z, pin 25)**:
+      both free, both PWM on the same timer. (They double as Wire2, which isn't used.)
+- [ ] 🤖 Code: magnet pins → 24/25, `analogWrite` holding level, and a "pick up and hold" crane
+      cycle for the 3rd target (grab at full power → rest → drop to holding level). Needs the
+      partner's OK (collection.cpp).
+- [ ] **PWM hold test:** 1 kg weight held at rest, stepping the holding level down (e.g. 100 → 70 →
+      50 → 35 %) to find the lowest that still holds through a shake. Then 2 min at that level:
+      feel the coils **and** the crane servo (it holds 1 kg on the arm the whole time).
 
 ## 3. On the floor  (waiting on a printed part to improve motion)
 - [ ] Obstacle avoidance on its own. `x` kills the motors.
+- [ ] **Does the V-notch swing actually clear a rejected object?** (REJECT = reverse ~10 cm, pivot,
+      ignore the spot 4 s.) The team isn't convinced it works, so test it with a plastic dummy and a
+      knocked-over weight. Tune `REJECT_REVERSE_MS` / pivot time / `REJECT_SUPPRESS_MS`. If objects
+      don't get pushed clear, or keep getting re-found: longer reverse + bigger turn first, then
+      the under-plate flinger.
+- [ ] Creep through the blind gap: tune `CREEP_SPEED_PCT` / `CREEP_MAX_MS` so a real weight reliably
+      reaches the inductive sensor before REJECT fires.
 - [ ] Approach + pickup on a single weight.
 - [ ] Tune `SIDE_NEAR_MM` (side IR, currently 150) against a red wall.
 - [ ] Paste the telemetry into a spreadsheet for report data: sorting/collection accuracy, speed,
