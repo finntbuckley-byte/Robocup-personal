@@ -1,72 +1,82 @@
-/*#include <Wire.h>
-#include <EEPROM.h>
+#include <Arduino.h>
+#include <Wire.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BNO055.h>
+#include "imu.h"
+#include "config.h"
 
-Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x28, &Wire1);
+static Adafruit_BNO055 bno(55, IMU_ADDR, &IMU_WIRE);
+static bool  ok = false;
+static float rawDeg = 0;      // BNO heading, 0-360
+static float zeroDeg = 0;
+static float rateDps = 0;
+static uint8_t gyroCal = 0;
 
-const int EEPROM_ID_ADDR = 0;
-const int EEPROM_CALIB_ADDR = sizeof(long);
-
-void setup() {
-  Serial.begin(115200);
-  while (!Serial) {}
-
-  Wire1.begin();
-  if (!bno.begin(OPERATION_MODE_NDOF)) {
-    Serial.println("BNO055 not detected — check wiring/address/bus");
-    while (1) {}
-  }
-  delay(1000);
-
-  // Try to restore a previously saved calibration for THIS sensor
-  long storedID;
-  EEPROM.get(EEPROM_ID_ADDR, storedID);
-  sensor_t sensor;
-  bno.getSensor(&sensor);
-
-  if (storedID == sensor.sensor_id) {
-    adafruit_bno055_offsets_t calibData;
-    EEPROM.get(EEPROM_CALIB_ADDR, calibData);
-    bno.setSensorOffsets(calibData);
-    Serial.println("Restored saved calibration from EEPROM.");
-  } else {
-    Serial.println("No saved calibration for this sensor — calibrate manually, then send 's' to save.");
-  }
-
-  bno.setExtCrystalUse(true);  // must be called AFTER restoring offsets
-  Serial.println("Ready. 'g' = 10s log, 's' = save current calibration.");
+static float wrap180(float d)
+{
+  while (d > 180) d -= 360;
+  while (d < -180) d += 360;
+  return d;
 }
 
-void loop() {
-  if (!Serial.available()) return;
-  char c = Serial.read();
-  while (Serial.available()) Serial.read();
+static void read()
+{
+  sensors_event_t e;
+  bno.getEvent(&e, Adafruit_BNO055::VECTOR_EULER);
+  rawDeg = e.orientation.x;
+  bno.getEvent(&e, Adafruit_BNO055::VECTOR_GYROSCOPE);
+  rateDps = IMU_GYRO_SIGN * e.gyro.z * 57.2958f;   // + = turning right
+  uint8_t s, a, m;
+  bno.getCalibration(&s, &gyroCal, &a, &m);
+}
 
-  if (c == 's' || c == 'S') {
-    adafruit_bno055_offsets_t calibData;
-    bno.getSensorOffsets(calibData);
-    sensor_t sensor;
-    bno.getSensor(&sensor);
-    EEPROM.put(EEPROM_ID_ADDR, sensor.sensor_id);
-    EEPROM.put(EEPROM_CALIB_ADDR, calibData);
-    Serial.println("Calibration saved to EEPROM.");
+bool imuInit()
+{
+  IMU_WIRE.beginTransmission(IMU_ADDR);
+  if (IMU_WIRE.endTransmission() != 0) { ok = false; return false; }
+  ok = bno.begin(OPERATION_MODE_IMUPLUS);
+  if (ok) { delay(50); read(); zeroDeg = rawDeg; }
+  return ok;
+}
+
+void imuUpdate()
+{
+  static unsigned long last = 0;
+  if (!ok || millis() - last < IMU_READ_MS) return;
+  last = millis();
+  read();
+}
+
+void imuZero()          { if (ok) { read(); zeroDeg = rawDeg; } }
+bool imuOk()            { return ok; }
+float imuHeadingDeg()   { return ok ? wrap180(IMU_HEADING_SIGN * (rawDeg - zeroDeg)) : 0.0f; }
+float imuRateDps()      { return ok ? rateDps : 0.0f; }
+uint8_t imuGyroCal()    { return gyroCal; }
+
+static float integ = HEADING_I_START; // % of steer from the I term
+static unsigned long lastHoldMs = 0;
+
+void headingHoldReset() { integ = HEADING_I_START; lastHoldMs = 0; }
+float headingHoldIntegral() { return integ; }
+
+// PID on heading error, the D from the gyro rate (no noisy differentiation).
+// err > 0 = we're LEFT of target -> steer right.
+int headingHoldSteer(float targetDeg)
+{
+  if (!ok) return 0;
+  float err = wrap180(targetDeg - imuHeadingDeg());
+
+  unsigned long now = millis();
+  if (lastHoldMs != 0 && now - lastHoldMs <= 100)
+  {
+    integ += HEADING_KI * err * (now - lastHoldMs) / 1000.0f;
+    if (integ >  HEADING_I_MAX) integ =  HEADING_I_MAX;
+    if (integ < -HEADING_I_MAX) integ = -HEADING_I_MAX;
   }
+  lastHoldMs = now;
 
-  if (c == 'g' || c == 'G') {
-    uint8_t sys, gyro, accel, mag;
-    bno.getCalibration(&sys, &gyro, &accel, &mag);
-    Serial.print("Calib sys/gyro/accel/mag: ");
-    Serial.print(sys); Serial.print(","); Serial.print(gyro); Serial.print(",");
-    Serial.print(accel); Serial.print(","); Serial.println(mag);
-
-    unsigned long start = millis();
-    while (millis() - start < 10000) {
-      sensors_event_t event;
-      bno.getEvent(&event);
-      Serial.println(event.orientation.x, 2);
-      delay(100);
-    }
-    Serial.println("Done. 'g' = log again, 's' = re-save calibration.");
-  }
-}*/
+  float s = HEADING_KP * err + integ - HEADING_KD * rateDps;
+  if (s >  HEADING_MAX_STEER) s =  HEADING_MAX_STEER;
+  if (s < -HEADING_MAX_STEER) s = -HEADING_MAX_STEER;
+  return (int)(s >= 0 ? s + 0.5f : s - 0.5f);
+}

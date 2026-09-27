@@ -15,6 +15,10 @@
  *     Tethered: 'g' / 'h' do the same timed run forward / reverse.
  *     Stored avg count / measured metres = ENC_COUNTS_PER_M.
  *
+ *  3. Heading hold: 'H' toggles it (default ON, needs the IMU). Stored runs
+ *     record hold on/off and the IMU heading at the end (+ = turned right),
+ *     so hold-off vs hold-on runs compare directly.
+ *
  *  Motors go through drive() so the trims, soft start and DRIVE_SCALE_PCT
  *  all apply, same as the nav build. Results live in RAM: they survive
  *  unplugging USB (the robot's power module keeps the Teensy up) but not
@@ -24,9 +28,11 @@
 
 #include <Arduino.h>
 #include <Encoder.h>
+#include <Wire.h>
 #include "config.h"
 #include "motor.h"
 #include "drive.h"
+#include "imu.h"
 
 static Encoder encL(PIN_ENC_L_A, PIN_ENC_L_B);
 static Encoder encR(PIN_ENC_R_A, PIN_ENC_R_B);
@@ -48,9 +54,21 @@ static bool resultPending = false;     // timed run finished, waiting to coast t
 static unsigned long stoppedAt = 0;
 static unsigned long goCountdownAt = 0;  // 0 = no countdown
 
-struct RunResult { unsigned long ms; int pct; int dir; long l, r; };
+// heading hold ('H' toggles). Target = the heading at the start of each run.
+static bool holdOn = true;
+
+// per-run trace of the hold: every TRACE_MS during a timed run ('T' prints)
+static const int TRACE_N = 50;
+static const unsigned long TRACE_MS = 100;
+struct Trace { uint8_t n; float hdg[TRACE_N]; int8_t steer[TRACE_N]; float integ[TRACE_N]; };
+static Trace cur;
+static int traceN = 0;
+static unsigned long traceAt = 0;
+
+struct RunResult { unsigned long ms; int pct; int dir; long l, r; bool hold; float hdg; };
 static const int MAX_RESULTS = 20;
 static RunResult results[MAX_RESULTS];
+static Trace traces[MAX_RESULTS];
 static int nResults = 0;
 
 static long cntL() { return ENC_L_SIGN * encL.read(); }
@@ -99,10 +117,14 @@ static void printHelp()
   Serial.println(" s      stop (any other key also stops)");
   Serial.println(" + / -  test speed +/-10 %");
   Serial.println(" p      print counts once");
+  Serial.println(" H      heading hold on/off (IMU) - stored with each run");
+  Serial.println(" R      reset the hold's learned integral     T  print run traces");
   Serial.print  (" speed "); Serial.print(testPct);
   Serial.print  ("%  (x DRIVE_SCALE_PCT "); Serial.print(DRIVE_SCALE_PCT); Serial.println("%)");
   Serial.print  (" timed run "); Serial.print(timedMs); Serial.println(" ms");
   Serial.print  (" stored runs "); Serial.println(nResults);
+  Serial.print  (" IMU "); Serial.print(imuOk() ? "ok" : "NOT FOUND");
+  Serial.print  ("   heading hold "); Serial.println(holdOn && imuOk() ? "ON" : "off");
   Serial.print  (" ENC_COUNTS_PER_M = "); Serial.println(ENC_COUNTS_PER_M);
   Serial.println("===========================");
   Serial.println("ms\tcmdL\tcmdR\tcntL\tcntR\tmmL\tmmR\tmmAvg\tcpsL\tcpsR");
@@ -144,12 +166,28 @@ static void printResultRow(int i)
   Serial.print('\t');     Serial.print(x.l);
   Serial.print('\t');     Serial.print(x.r);
   Serial.print('\t');     Serial.print((x.l + x.r) / 2);
-  Serial.print('\t');     Serial.println(x.r != 0 ? (float)x.l / x.r : 0.0f, 3);
+  Serial.print('\t');     Serial.print(x.r != 0 ? (float)x.l / x.r : 0.0f, 3);
+  Serial.print('\t');     Serial.print(x.hold ? "on" : "off");
+  Serial.print('\t');     Serial.println(x.hdg, 1);
+}
+
+static void printTraces()
+{
+  Serial.println("TRACE\trun\tt_ms\thdg\tsteer\tintegral");
+  for (int i = 0; i < nResults; i++)
+    for (int k = 0; k < traces[i].n; k++)
+    {
+      Serial.print("TRACE\t"); Serial.print(i + 1);
+      Serial.print('\t'); Serial.print(k * TRACE_MS);
+      Serial.print('\t'); Serial.print(traces[i].hdg[k], 1);
+      Serial.print('\t'); Serial.print(traces[i].steer[k]);
+      Serial.print('\t'); Serial.println(traces[i].integ[k], 1);
+    }
 }
 
 static void listResults()
 {
-  Serial.println("RUN\t#\tdir\trunMs\tspeedPct\tcntL\tcntR\tavg\tL/R");
+  Serial.println("RUN\t#\tdir\trunMs\tspeedPct\tcntL\tcntR\tavg\tL/R\thold\thdgEnd");
   for (int i = 0; i < nResults; i++) printResultRow(i);
   if (nResults == 0) Serial.println("(no runs stored)");
 }
@@ -174,6 +212,10 @@ static void startRun(int l, int r, unsigned long limitMs)
 static void startTimed(int dir)
 {
   encL.write(0); encR.write(0);
+  imuZero();                      // hold target = straight ahead from here
+  // NOT resetting the hold's integral: the drag bias it learned carries over
+  // to the next run, like it does between FORWARD stretches in nav. 'R' resets.
+  traceN = 0; traceAt = 0;
   timedDir = dir;
   resultPending = true;
   Serial.print("TIMED "); Serial.print(dir > 0 ? "forward " : "reverse ");
@@ -192,8 +234,9 @@ static void cancelTimed(const char *why)
 // store once the tracks have coasted to a stop
 static void storeResult()
 {
-  RunResult x = { timedMs, testPct, timedDir, cntL(), cntR() };
-  if (nResults < MAX_RESULTS) results[nResults++] = x;
+  RunResult x = { timedMs, testPct, timedDir, cntL(), cntR(), holdOn && imuOk(), imuHeadingDeg() };
+  cur.n = traceN;
+  if (nResults < MAX_RESULTS) { traces[nResults] = cur; results[nResults++] = x; }
   else Serial.println("result store full - 'C' to clear");
   listResults();
 }
@@ -205,6 +248,8 @@ void setup()
   while (!Serial && millis() - t0 < 2000) {}
   motor_init();
   stopMotors();
+  Wire.begin(); Wire.setClock(400000);
+  if (!imuInit()) Serial.println("!! IMU not found - heading hold unavailable");
   if (PIN_GO >= 0) pinMode(PIN_GO, GO_ACTIVE_LOW ? INPUT_PULLUP : INPUT);
   printHelp();
 }
@@ -232,6 +277,9 @@ void loop()
       case 'p': printRow(); break;
       case 'L': listResults(); break;
       case 'C': nResults = 0; Serial.println("stored runs cleared"); break;
+      case 'H': holdOn = !holdOn; Serial.print("heading hold "); Serial.println(holdOn ? "ON" : "off"); break;
+      case 'R': headingHoldReset(); Serial.println("hold integral reset"); break;
+      case 'T': printTraces(); break;
       case '\n': case '\r': break;
       default: if (runL || runR || goCountdownAt) cancelTimed("key"); break;
     }
@@ -253,10 +301,22 @@ void loop()
     startTimed(+1);
   }
 
+  imuUpdate();
+
   bool running = runL || runR;
   if (running)
   {
-    drive(runL * testPct, runR * testPct);   // called every loop so the soft start ramps
+    // hold only on straight runs (both tracks the same way) - steer + = right
+    int steer = (holdOn && runL == runR) ? headingHoldSteer(0) : 0;
+    drive(runL * testPct + steer, runR * testPct - steer);   // every loop so the soft start ramps
+    if (resultPending && traceN < TRACE_N && millis() - traceAt >= TRACE_MS)
+    {
+      traceAt = millis();
+      cur.hdg[traceN] = imuHeadingDeg();
+      cur.steer[traceN] = (int8_t)steer;
+      cur.integ[traceN] = headingHoldIntegral();
+      traceN++;
+    }
     if (millis() - runStart >= runLimitMs) stopRun(resultPending ? "timed" : "timeout");
   }
   else

@@ -40,16 +40,56 @@
 #include "round.h"
 #include "gate.h"
 #include "odometry.h"
+#include "imu.h"
 
-static bool killed = false;          // 'x' on the serial menu - bench safety only
+static bool killed = false;
+
+// TEMP DIAGNOSTIC (28/9, notch ToF falling back to 0x29): which of the ToF
+// addresses answer, and what model sits at 0x29. Remove once found.
+static bool ping(uint8_t a) { Wire.beginTransmission(a); return Wire.endTransmission() == 0; }
+static void probeTofs(const char *when)
+{
+  Serial.print("[probe "); Serial.print(when); Serial.print("] answering:");
+  for (uint8_t a : { (uint8_t)0x29, (uint8_t)0x34, (uint8_t)0x35, (uint8_t)0x36, (uint8_t)0x37 })
+    if (ping(a)) { Serial.print(" 0x"); Serial.print(a, HEX); }
+  if (ping(0x29))
+  {
+    Wire.beginTransmission(0x29); Wire.write(0x01); Wire.write(0x0F);   // VL53L1X model ID reg
+    Wire.endTransmission(false); Wire.requestFrom((uint8_t)0x29, (uint8_t)1);
+    int id = Wire.available() ? Wire.read() : -1;
+    Serial.print("  | 0x29 model id 0x"); Serial.print(id, HEX);
+    Serial.print(id == 0xEA ? " = VL53L1X" : " = not an L1X");
+  }
+  Serial.println();
+}
+
+// live I2C scan of both buses ('i') - who answers where right now
+static void i2cScan()
+{
+  TwoWire *buses[2] = { &Wire, &Wire1 };
+  const char *names[2] = { "Wire ", "Wire1" };
+  for (int b = 0; b < 2; b++)
+  {
+    Serial.print(names[b]); Serial.print(":");
+    for (uint8_t a = 1; a < 127; a++)
+    {
+      buses[b]->beginTransmission(a);
+      if (buses[b]->endTransmission() == 0) { Serial.print(" 0x"); Serial.print(a, HEX); }
+    }
+    Serial.println();
+  }
+}          // 'x' on the serial menu - bench safety only
 
 static void printHelp()
 {
   Serial.println("\n=========== nav build ===========");
   Serial.println(" ?  this menu");
   Serial.println(" g  print the 8x8 grid (orientation / band check)");
+  Serial.println(" u  ToF diagnostics: raw mm, status, data age");
+  Serial.println(" i  I2C scan of Wire and Wire1");
   Serial.println(" t  telemetry on/off");
   Serial.println(" x  KILL - stop motors until reset");
+  if (GO_STOPS_ROUND) Serial.println(" GO pressed again during a round = STOP (testing; off for competition)");
   Serial.println("=================================");
 }
 
@@ -57,7 +97,7 @@ static bool telemetryOn = true;
 
 static void printTelemetryHeader()
 {
-  Serial.println("ms\tround\tmode\tBL\tBR\tUP\tREAR\tX8L\tX8R\tIRL\tIRR\tfun\tind\tW\tpicks\treal\tdummy\tonb\trej\tdrvL\tdrvR\todo\todoRaw\tslip\tstall\tgoD\tgoA");
+  Serial.println("ms\tround\tmode\tBL\tBR\tUP\tREAR\tX8L\tX8R\tIRL\tIRR\tfun\tind\tW\tpicks\treal\tdummy\tonb\trej\tdrvL\tdrvR\todo\todoRaw\tslip\tstall\thdg\tgoD\tgoA");
 }
 
 static void printTelemetry()
@@ -98,6 +138,8 @@ static void printTelemetry()
   Serial.print(odomRawDistanceMM(), 0); Serial.print('\t');   // encoders only
   Serial.print(odomSlipping() ? 1 : 0); Serial.print('\t');
   Serial.print(odomStalled() ? 1 : 0);  Serial.print('\t');
+  if (imuOk()) Serial.print(imuHeadingDeg(), 1); else Serial.print('-');   // + = right of start
+  Serial.print('\t');
   // raw GO pin, digital + 10-bit analog - bring-up diagnostic
   if (PIN_GO >= 0) { Serial.print(digitalRead(PIN_GO)); Serial.print('\t'); Serial.println(analogRead(PIN_GO)); }
   else             { Serial.println("-\t-"); }
@@ -112,6 +154,12 @@ static void handleSerial()
   {
     case '?': printHelp(); break;
     case 'g': x8PrintGrid(); break;
+    case 'u': tofPrintRaw(); break;
+    case 'i': i2cScan(); probeTofs("now"); break;
+    case 'r':
+      Serial.print("re-init notch ToF: "); Serial.println(tofReinitL1X(TOF_UPRIGHT) ? "ok" : "FAILED");
+      probeTofs("just after re-init");
+      break;
     case 't': telemetryOn = !telemetryOn; if (telemetryOn) printTelemetryHeader(); break;
     case 'x': killed = true; driveHardStop(); Serial.println("!!! KILLED - reset to run again"); break;
     default: break;
@@ -134,9 +182,13 @@ void setup()
 
   Serial.println("\n--- RoboCup G23 nav build ---");
   tofInit();
+  probeTofs("after tofInit");
   x8Init();              // blocks ~5s setting 8x8 mode
+  probeTofs("after x8Init");
   irSensorsInit();
   odomInit();
+  Serial.println(imuInit() ? "IMU ok (BNO055, IMUPLUS)" : "!! IMU not found - no heading hold");
+  probeTofs("after imuInit");
   funnelSensorInit();
   roundInit();
 
@@ -153,6 +205,7 @@ void loop()
   x8Update();
   irSensorsUpdate();
   odomUpdate();          // after the 8x8 / rear ToF - the slip check reads them
+  imuUpdate();
 
   // 2. weight candidate
   weightDetectUpdate();
@@ -166,7 +219,7 @@ void loop()
 
   // 5. round + navigation
   roundUpdate();
-  if (roundJustStarted()) { navigationInit(); odomReset(); }   // distance measured from the start position
+  if (roundJustStarted()) { navigationInit(); odomReset(); imuZero(); headingHoldReset(); }   // distance + heading from the start position
 
   if (killed)             driveHardStop();
   else if (!roundRunning()) stopMotors();

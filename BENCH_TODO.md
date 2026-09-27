@@ -3,6 +3,62 @@
 Work top to bottom. 🤖 = Claude can do it from the laptop once the Teensy is plugged in (with a
 **data** USB cable).
 
+## 0. Next session (from 27–28/9 late)
+- [ ] **Notch ToF (CON27, XSHUT0, L1X) resets itself - electrical fault.** Sets up fine, then
+      within ~0.5 s of starting to range it drops off the bus and ~2 s later reboots at the default
+      0x29, never giving a reading (`UP` always 0). Classic brownout. Worked 25/9 (57–61 mm), so
+      something physical changed. Not a code problem: the rear L1X uses the same code and works.
+      Diagnostics in the nav build: `u` (per-ToF raw mm / status / data age / I2C error),
+      `i` (I2C scan + ToF probe), `r` (re-init the notch ToF and probe it).
+  - [ ] Power off, reseat the CON27 cable at both ends; check it isn't pinched near the notch,
+        funnel or the new IMU mount. Power up, `u`.
+  - [ ] Still failing: swap the notch and rear L1X cables (CON27 <-> CON30). Fault moves to
+        index 3 = the sensor is dead (2 spare VL53L1X in the red box). Stays on index 2 = the
+        CON27 connector / cable / board supply.
+  - [ ] Optional: 3.3 V at the notch sensor's pins.
+  - [ ] Once fixed: remove the TEMP diagnostics (the `probeTofs()` boot prints in nav_main.cpp
+        and `tofReinitL1X()` / `r`); keep `u` and `i`.
+  - Only affects the funnel telemetry - pickup uses the inductive, weight-finding uses the
+    bottom ToFs + 8x8 - so it does NOT block avoidance tests.
+- [ ] **After the flange reprint:** ruler runs again (enctest GO, hold on). Read the steady
+      `integral` from the traces (`T`) → `HEADING_I_START` in config.h (runs that started
+      pre-loaded at ~-8 to -10 % were the straightest).
+- [ ] Recalibrate `ENC_COUNTS_PER_M` **with the heading hold on**, on the **arena floor**: hold-on
+      runs gave ~15,750–15,900 counts/m vs 15,640 without (steering scrub adds counts).
+- [ ] Heading-hold findings 28/9: IMU matches the ruler within ~1 deg; hold cut the turn from
+      8–12 deg to 1–5 deg over ~60 cm. The robot runs straight for ~1 s then starts turning
+      right in most runs - partly the floor at the first test spot, partly something on the robot
+      (check again after the reprint).
+- [ ] 8x8 check on the floor before the obstacle test: `g` - r5–r7 floor ~0.4–0.7 m, r2–r4 clear
+      (0 or >1.5 m) with nothing ahead; a box 50 cm ahead shows in r2–r4.
+- [x] **First wall test (28/9, log `docs/testdata/2026-09-28_nav_wall_test.log`):** drove at a
+      low box from ~68 cm; 8x8 closure matched the encoders (418 vs 435 mm); at ~25 cm it turned
+      LEFT towards the open side (correct direction - motor fix confirmed); GO-stop worked.
+- [ ] **IMU heading frozen in nav:** `hdg` read 0.0 for the whole wall test despite turning both
+      ways (worked in WAIT on the first nav boot; one boot said "IMU not found"). The IMU is
+      flaky on `Wire` - check together with the notch ToF fault (same bus). Heading hold was
+      effectively OFF in that run.
+  - [ ] **Hypothesis: 3.3 V brownout, not the I2C bus.** One cause fits both faults: the notch ToF
+        resets the moment it starts ranging (current pulses), and a BNO055 that browns out
+        reboots into CONFIG mode where its heading output stops updating (= constant 0.0 while
+        the code still thinks it's fine). Heading worked in WAIT (motors off), froze during the
+        run (motors on). Both faults appeared after the IMU was fitted (extra load / disturbed
+        cables). Nothing run in software could have caused it.
+  - [ ] Test: on blocks, motors on (enctest `f`), watch the BNO055 operating mode (reg 0x3D,
+        IMUPLUS = 0x08) + the notch ToF; check sensor power/ground cables and the 3.3 V at the
+        sensors under motor load.
+  - [ ] Software safety net regardless: detect a BNO055 reset (mode register != IMUPLUS) and
+        re-init it keeping the heading continuous; same idea for a ToF that falls back to 0x29.
+        A sensor rebooting mid-round must not blind the robot.
+- [ ] **Low box: hit it, then read it as a weight.** Closing to 258 mm (turn is 250), the box
+      dropped BELOW the band's view (reading jumped back to 353/401 mm), so it carried on and
+      touched before turning. Then: after the turn it went to APPROACH / TURN_R / ESCAPE chasing
+      the box - the bottom ToFs saw it but the 8x8 band looked over it (it's low), which is
+      exactly the weight signature. Arena walls are 400 mm so they shouldn't do this, but low
+      obstacles / the other robot might. Repeat the test with a wall or tall box (>= 300 mm).
+- [ ] Head-on walls: the CAUTION veer barely acts (both halves equal), so it goes straight to
+      the 25 cm turn. Fine for now; watch it at higher DRIVE_SCALE_PCT (stopping distance).
+
 ## 1. Bench: robot on blocks, tracks off the ground
 - [x] 🤖 **Wire finder** (done 25/9: ToFs + expander on Wire, 8×8 on Wire1, CON27 = L1X): `pio run -e wirefind -t upload`. It finds:
   - which I2C bus the ToFs and the XSHUT expander use. That goes into `TOF_WIRE` / `SX_WIRE` in `config.h`.
@@ -77,6 +133,11 @@ Flash `nav`, robot on blocks, say go before pressing GO. 🤖 logs each one.
       avoidance success rate.
 
 ## 4. Later
+- [ ] **BEFORE COMPETITION: `GO_STOPS_ROUND = false`** (`config.h`). It lets a 2nd GO press stop a
+      round for untethered testing (added 28/9), but no human intervention is allowed in a real
+      round and a stray press must never end it.
+- [ ] Heading hold in nav FORWARD (`USE_HEADING_HOLD`, `HEADING_KP/KD`): tune on the floor. Hold
+      proven first in enctest (`H` toggles it), then in nav with the `hdg` telemetry column.
 - [x] (done, wired) Wire the **GO button** (e.g. A0Z, CON68) and set `PIN_GO`.
 - [ ] Fit the IMU and write homing + delivery. Then turn on `USE_HOMING`.
 - [ ] Gate/flap sorting logic: keep metal, drop dummies.

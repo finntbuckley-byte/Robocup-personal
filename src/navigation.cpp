@@ -8,6 +8,7 @@
 #include "collection.h"
 #include "round.h"
 #include "funnel_sensor.h"   // inductiveMetalNow()
+#include "imu.h"
 
 // ============================================================================
 //  navigation.cpp  -  built only by [env:nav] (see platformio.ini).
@@ -91,6 +92,8 @@ static int  rejectCount = 0;
 static unsigned long metalSince = 0;
 
 static void setMode(int m) { mode = m; modeStart = millis(); }
+
+static float holdTarget = 0;         // heading FORWARD is holding (imu.h: + = right)
 
 // inductive reads metal continuously for INDUCTIVE_CONFIRM_MS
 static bool metalConfirmed()
@@ -387,6 +390,14 @@ void navigationUpdate()
       int steer = cautionVeer();
       if (sideNearLeft())  steer += SIDE_NUDGE_PCT;
       if (sideNearRight()) steer -= SIDE_NUDGE_PCT;
+      // heading hold: steering on purpose (or just out of a turn) re-aims it
+      if (USE_HEADING_HOLD && imuOk())
+      {
+        if (steer != 0 || millis() - modeStart < HEADING_HOLD_SETTLE_MS)
+          holdTarget = imuHeadingDeg();
+        else
+          steer = headingHoldSteer(holdTarget);
+      }
       drive(speed + steer, speed - steer);
       break;
     }

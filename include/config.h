@@ -315,9 +315,40 @@ const int      ODOM_STALL_MIN_PCT         = 20;
 // and electromagnets would corrupt it). Heading is relative - zeroed at GO.
 #define IMU_WIRE Wire
 const uint8_t IMU_ADDR = 0x28;          // BNO055 default (0x29 if its ADR pin is high)
-// +1 if a clockwise turn (seen from above) = heading going UP, else -1, so
-// that in firmware + = turned RIGHT. TODO(verify) with imutest.
+// Signs so that in firmware + = turned RIGHT (clockwise seen from above).
+// imutest 2026-09-27, unambiguous check (standing behind the robot, front
+// swung to the RIGHT ~33 deg): raw BNO heading went UP, raw gyro Z went
+// NEGATIVE. So heading +1, gyro rate -1. (An earlier by-hand test was
+// misdescribed and briefly set the heading sign to -1 - that made the hold
+// steer INTO the error on the blocks check.)
 const int IMU_HEADING_SIGN = +1;
+const int IMU_GYRO_SIGN    = -1;
+const unsigned long IMU_READ_MS = 20;   // 50 Hz
+
+// Heading hold (imu.cpp headingHoldSteer): PID,
+//   steer % = KP*err + KI*integral(err) - KD*rate
+// used as drive(speed + steer, speed - steer).
+// 28/9 floor runs, PD only (KP 2, KD 0.2): the ~10 deg right turn became a
+// steady ~5 deg (IMU matched the ruler within 0.7 deg) - P alone settles
+// where KP*err balances the track drag. KI added to remove that offset.
+// TODO(verify): tune on the floor with enctest ('H' toggles the hold) -
+// weaving = lower KP/KI or raise KD; slow to come back = raise KI.
+const float HEADING_KP        = 2.0f;   // % per degree of error
+const float HEADING_KI        = 2.0f;   // % per degree-second of error
+const float HEADING_KD        = 0.2f;   // % per deg/s of yaw rate (damping)
+const float HEADING_I_MAX     = 20.0f;  // % cap on the integral's share (anti-windup)
+// Where the integral starts at every headingHoldReset() (boot, round start):
+// the robot's learned drag bias, so each round begins already compensated.
+// TODO(verify): 0 until measured - read the steady 'integral' column from
+// enctest traces ('T') AFTER the flange reprint (28/9) and put it here.
+const float HEADING_I_START   = 0.0f;
+const int   HEADING_MAX_STEER = 30;     // % cap on the total
+// nav FORWARD: hold the heading while cruising. Any intentional steer (8x8
+// veer, side-IR nudge) re-aims the hold at the current heading, and for the
+// first HEADING_HOLD_SETTLE_MS after entering FORWARD it just tracks (the
+// soft stop means a turn is still finishing).
+const bool  USE_HEADING_HOLD        = true;
+const unsigned long HEADING_HOLD_SETTLE_MS = 300;
 
 // ---------------------------------------------------------------------------
 // WEIGHT DETECTION  (bottom ToF vs 8x8 obstacle band, same side)
@@ -408,6 +439,11 @@ const unsigned long PICKUP_TIMEOUT_MS = 8000;
 const int  PIN_GO           = 14;
 const bool GO_ACTIVE_LOW    = false;
 const unsigned long GO_DEBOUNCE_MS      = 50;
+// BENCH/FLOOR TESTING ONLY: a 2nd GO press during a round ends it (motors
+// soft-stop, round OVER). Lets you stop an untethered test without USB.
+// TODO(competition): set false - no human intervention is allowed, and a
+// stray press must never end a real round.
+const bool GO_STOPS_ROUND = true;
 const unsigned long AUTO_START_DELAY_MS = 3000;
 
 const unsigned long ROUND_MS        = 120000;

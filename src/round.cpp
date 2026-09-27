@@ -95,13 +95,20 @@ void roundUpdate()
         startAt = millis();
         justStarted = true;
         phase = PHASE_RUNNING;
+        goArmed = false;               // GO must be released before a stop press counts
+        goUpSince = goDownSince = 0;
         Serial.println(">>> ROUND START");
       }
       break;
     }
 
     case PHASE_RUNNING:
-      if (roundElapsedMs() >= ROUND_MS - ROUND_END_MARGIN_MS)
+      if (GO_STOPS_ROUND && goPressed())       // testing only - see config.h
+      {
+        phase = PHASE_OVER;
+        Serial.print(">>> ROUND STOPPED (GO) at "); Serial.print(roundElapsedMs()); Serial.println(" ms");
+      }
+      else if (roundElapsedMs() >= ROUND_MS - ROUND_END_MARGIN_MS)
       {
         phase = PHASE_OVER;
         Serial.print(">>> ROUND OVER  real:"); Serial.print(realWeightCount);

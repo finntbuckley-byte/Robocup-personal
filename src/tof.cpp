@@ -30,6 +30,11 @@ static VL53L1X l1x[TOF_COUNT];
 uint16_t tofMM[TOF_COUNT] = {0};
 static bool tofSensorOk[TOF_COUNT] = {false};
 
+// diagnostics ('u' in nav): the last raw reading, even when rejected
+static uint16_t rawMM[TOF_COUNT] = {0};
+static uint8_t  rawStatus[TOF_COUNT] = {0};     // L1X range_status, 0 = valid
+static unsigned long lastDataMs[TOF_COUNT] = {0};
+
 uint16_t &tofBL      = tofMM[TOF_BL];
 uint16_t &tofBR      = tofMM[TOF_BR];
 uint16_t &tofUpright = tofMM[TOF_UPRIGHT];
@@ -132,6 +137,7 @@ void tofUpdate()
     {
       if (!l1x[i].dataReady()) continue;
       uint16_t mm = l1x[i].read(false);
+      rawMM[i] = mm; rawStatus[i] = l1x[i].ranging_data.range_status; lastDataMs[i] = millis();
       // seen 2026-09-25: "valid" status with 64351mm - reject anything past range
       bool valid = l1x[i].ranging_data.range_status == VL53L1X::RangeValid && mm <= TOF_MAX_VALID_MM;
       tofMM[i] = valid ? mm : 0;
@@ -140,6 +146,7 @@ void tofUpdate()
     {
       if ((l0x[i].readReg(L0X_REG_INTERRUPT_STATUS) & 0x07) == 0) continue;
       uint16_t mm = l0x[i].readRangeContinuousMillimeters();
+      rawMM[i] = mm; rawStatus[i] = 0; lastDataMs[i] = millis();
       tofMM[i] = (mm >= L0X_NO_TARGET_MM) ? 0 : mm;
     }
   }
@@ -151,3 +158,49 @@ bool tofOk(int index)
 }
 
 bool rearBlocked() { return tofRear > 0 && tofRear < REAR_STOP_MM; }
+
+// TEMP DIAGNOSTIC (28/9): re-init one L1X that has fallen back to its
+// default address 0x29 (XSHUT still high) - to see whether it drops out
+// again as soon as it starts ranging.
+bool tofReinitL1X(int i)
+{
+  if (i < 0 || i >= TOF_COUNT || TOF_TYPE[i] != 1) return false;
+  l1x[i] = VL53L1X();                 // fresh object = default address 0x29
+  l1x[i].setBus(&TOF_WIRE);
+  l1x[i].setTimeout(100);
+  bool ok = l1x[i].init();
+  if (ok)
+  {
+    l1x[i].setAddress(TOF_ADDRESS_START + i);
+    l1x[i].setDistanceMode(TOF_SHORT_MODE[i] ? VL53L1X::Short : VL53L1X::Long);
+    l1x[i].setMeasurementTimingBudget(TOF_L1X_BUDGET_US);
+    l1x[i].startContinuous(TOF_PERIOD_MS);
+  }
+  tofSensorOk[i] = ok;
+  lastDataMs[i] = 0;
+  return ok;
+}
+
+// One line per sensor: what it last reported and why it may have been dropped.
+// L1X status (Pololu VL53L1X::RangeStatus): 0 valid, 1 sigma fail, 2 signal
+// fail (weak return), 3 min-range clipped, 4 out of bounds, 5 hardware fail,
+// 7 wrap target, 13 min range fail, 255 none.
+void tofPrintRaw()
+{
+  Serial.println("ToF\tok\tused_mm\traw_mm\tstatus\tdata_age_ms\ti2c_err\taddr");
+  for (int i = 0; i < TOF_COUNT; i++)
+  {
+    Serial.print(i);                          Serial.print('\t');
+    Serial.print(tofSensorOk[i] ? 1 : 0);     Serial.print('\t');
+    Serial.print(tofMM[i]);                   Serial.print('\t');
+    Serial.print(rawMM[i]);                   Serial.print('\t');
+    Serial.print(rawStatus[i]);               Serial.print('\t');
+    if (lastDataMs[i]) Serial.print(millis() - lastDataMs[i]);
+    else               Serial.print("never");
+    // last I2C result for that sensor: 0 ok, 2 address NACK, 3 data NACK, 4 other
+    Serial.print('\t');
+    Serial.print(TOF_TYPE[i] == 1 ? l1x[i].last_status : l0x[i].last_status);
+    Serial.print("\t0x");
+    Serial.println(TOF_TYPE[i] == 1 ? l1x[i].getAddress() : l0x[i].getAddress(), HEX);
+  }
+}

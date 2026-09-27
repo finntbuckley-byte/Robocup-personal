@@ -130,7 +130,7 @@ void loop()
   Serial.print(eul.orientation.x, 1);      Serial.print('\t');
   Serial.print(eul.orientation.y, 1);      Serial.print('\t');
   Serial.print(eul.orientation.z, 1);      Serial.print('\t');
-  Serial.print(gyr.gyro.z * 57.2958f, 1);  Serial.print('\t');   // rad/s -> deg/s
+  Serial.print(IMU_GYRO_SIGN * gyr.gyro.z * 57.2958f, 1);  Serial.print('\t');   // deg/s, + = right
   Serial.print(sC); Serial.print('\t');
   Serial.print(gC); Serial.print('\t');
   Serial.print(aC); Serial.print('\t');
