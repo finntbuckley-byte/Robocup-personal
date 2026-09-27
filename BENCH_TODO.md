@@ -25,7 +25,7 @@ Work top to bottom. 🤖 = Claude can do it from the laptop once the Teensy is p
       pre-loaded at ~-8 to -10 % were the straightest).
 - [ ] Recalibrate `ENC_COUNTS_PER_M` **with the heading hold on**, on the **arena floor**: hold-on
       runs gave ~15,750–15,900 counts/m vs 15,640 without (steering scrub adds counts).
-- [ ] Heading-hold findings 28/9: IMU matches the ruler within ~1 deg; hold cut the turn from
+- [x] (record) Heading-hold findings 28/9: IMU matches the ruler within ~1 deg; hold cut the turn from
       8–12 deg to 1–5 deg over ~60 cm. The robot runs straight for ~1 s then starts turning
       right in most runs - partly the floor at the first test spot, partly something on the robot
       (check again after the reprint).
@@ -75,7 +75,8 @@ Work top to bottom. 🤖 = Claude can do it from the laptop once the Teensy is p
 - [x] (done 25/9: 66 mm) 🤖 Read the empty-funnel `UP` value in the telemetry and set `FUNNEL_PRESENT_MM` below it.
 - [x] Speed-ramp test: check the 68% fwd / 73% rev pulse caps. (25/9: team confirmed max 1950 fwd / 1050 rev µs, caps match) Raise them in `config.h` if the tracks
       clearly run faster above that.
-- [ ] Check the tracks turn the right way: motor 1 = left, motor 2 = right.
+- [x] Check the tracks turn the right way: motor 1 = left, motor 2 = right. (27/9: were swapped and the
+      left was reversed - fixed at the driver/encoder board; wall test turned the right way.)
 
 ## 2. Crane (with the partner)
 - [x] Smooth eased moves integrated (`smooth_servo.cpp`), crane angles/speeds in `config.h`
@@ -139,7 +140,8 @@ Flash `nav`, robot on blocks, say go before pressing GO. 🤖 logs each one.
 - [ ] Heading hold in nav FORWARD (`USE_HEADING_HOLD`, `HEADING_KP/KD`): tune on the floor. Hold
       proven first in enctest (`H` toggles it), then in nav with the `hdg` telemetry column.
 - [x] (done, wired) Wire the **GO button** (e.g. A0Z, CON68) and set `PIN_GO`.
-- [ ] Fit the IMU and write homing + delivery. Then turn on `USE_HOMING`.
+- [ ] Write homing + delivery (IMU fitted 27/9, heading + encoder distance ready). Then turn on
+      `USE_HOMING`.
 - [ ] Gate/flap sorting logic: keep metal, drop dummies.
 - [ ] **Drive encoders (27/9)**: `odometry.cpp` + `enctest` env.
   - [x] Wired: Encoder IO board on **CON55 (D2–D5)**, L A/B = 2/3, R A/B = 4/5 (one board, both motors).
@@ -148,7 +150,8 @@ Flash `nav`, robot on blocks, say go before pressing GO. 🤖 logs each one.
   - [x] Signs (enctest, on blocks): `ENC_L_SIGN = -1`, `ENC_R_SIGN = 1` - forward counts up on both.
   - [x] `ENC_COUNTS_PER_M = 15430`: 5 GO-button runs of ~63 cm at cruise, sd 0.4% (not the arena floor).
   - [ ] Recheck counts/m on the **arena floor** (1–2 runs) when it's free.
-  - [ ] **Forward trim at cruise:** those runs turned **right ~9°** (6.8–12.2°) and drifted ~5 cm right
+  - [x] (superseded - the trim isn't the lever: encoders showed equal track speed while it still
+        turned, so it's track/floor drag; the heading hold handles it) **Forward trim at cruise:** those runs turned **right ~9°** (6.8–12.2°) and drifted ~5 cm right
         over 63 cm, with `DRIVE_TRIM_L_FWD` 0.90. Part of that was the jolt from the instant stop; the
         soft stop (`DRIVE_DECEL_MS`) is now in. Rerun 3× with enctest (GO) and lower the left trim
         if it still turns right. The IMU heading hold will take out what's left.
