@@ -117,6 +117,15 @@ Flash `nav`, robot on blocks, say go before pressing GO. 🤖 logs each one.
 
 ## 3. On the floor  (waiting on a printed part to improve motion)
 - [ ] Obstacle avoidance on its own. `x` kills the motors.
+  - [x] Tall-box run 28/9 (`docs/testdata/2026-09-28_nav_tallbox_test2.log`, 20 s, IMU working):
+        avoided the box (TURN_R at 24/27 cm, closest ~17 cm, no contact), hold steered against
+        the right drift, then held ~89 deg after the turn. Got out of a corner but slowly.
+  - [ ] **Corner handling:** TURN_L went straight into TURN_R (flip-flop), then a 2.2 s spin with
+        the 8x8 at 3-8 cm. Commit to one turn direction in corners / go to ESCAPE sooner.
+  - [ ] **False weight detections near walls/corners:** several APPROACH entries with no weight
+        (bottom ToFs see the wall base at an angle, 8x8 band doesn't match on that side). Tune
+        weight_detect (margin / require the candidate to persist / ignore when a wall is close).
+  - [ ] **SCAN started with a wall 30 cm away** (6.1 s): only allow SCAN with clear space around.
 - [ ] **Raise `DRIVE_SCALE_PCT` back to 100** (`config.h`, currently 50 = half the usable pulse
       range, a safety limiter for first floor tests). Once avoidance behaves, step 50 → 75 → 100 and
       retest avoidance at each step: stopping distance grows with speed, so the 8×8 thresholds may
