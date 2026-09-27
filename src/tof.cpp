@@ -159,28 +159,6 @@ bool tofOk(int index)
 
 bool rearBlocked() { return tofRear > 0 && tofRear < REAR_STOP_MM; }
 
-// TEMP DIAGNOSTIC (28/9): re-init one L1X that has fallen back to its
-// default address 0x29 (XSHUT still high) - to see whether it drops out
-// again as soon as it starts ranging.
-bool tofReinitL1X(int i)
-{
-  if (i < 0 || i >= TOF_COUNT || TOF_TYPE[i] != 1) return false;
-  l1x[i] = VL53L1X();                 // fresh object = default address 0x29
-  l1x[i].setBus(&TOF_WIRE);
-  l1x[i].setTimeout(100);
-  bool ok = l1x[i].init();
-  if (ok)
-  {
-    l1x[i].setAddress(TOF_ADDRESS_START + i);
-    l1x[i].setDistanceMode(TOF_SHORT_MODE[i] ? VL53L1X::Short : VL53L1X::Long);
-    l1x[i].setMeasurementTimingBudget(TOF_L1X_BUDGET_US);
-    l1x[i].startContinuous(TOF_PERIOD_MS);
-  }
-  tofSensorOk[i] = ok;
-  lastDataMs[i] = 0;
-  return ok;
-}
-
 // One line per sensor: what it last reported and why it may have been dropped.
 // L1X status (Pololu VL53L1X::RangeStatus): 0 valid, 1 sigma fail, 2 signal
 // fail (weak return), 3 min-range clipped, 4 out of bounds, 5 hardware fail,

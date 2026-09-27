@@ -13,6 +13,8 @@ bool  imuOk();
 float imuHeadingDeg();        // -180..180 since the last imuZero()
 float imuRateDps();           // yaw rate, + = turning right
 uint8_t imuGyroCal();         // BNO gyro calibration 0-3
+uint8_t imuOprMode();         // BNO OPR_MODE: 0x08 = IMUPLUS (good), 0x00 = rebooted, 0xFE = no answer
+int     imuResetCount();      // brownout resets detected + recovered since boot
 
 // Steering (% differential, + = steer right) to bring the heading back to
 // targetDeg. Use as drive(speed + s, speed - s). 0 if the IMU isn't ok.

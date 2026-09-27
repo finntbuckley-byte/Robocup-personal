@@ -4,22 +4,11 @@ Work top to bottom. 🤖 = Claude can do it from the laptop once the Teensy is p
 **data** USB cable).
 
 ## 0. Next session (from 27–28/9 late)
-- [ ] **Notch ToF (CON27, XSHUT0, L1X) resets itself - electrical fault.** Sets up fine, then
-      within ~0.5 s of starting to range it drops off the bus and ~2 s later reboots at the default
-      0x29, never giving a reading (`UP` always 0). Classic brownout. Worked 25/9 (57–61 mm), so
-      something physical changed. Not a code problem: the rear L1X uses the same code and works.
-      Diagnostics in the nav build: `u` (per-ToF raw mm / status / data age / I2C error),
-      `i` (I2C scan + ToF probe), `r` (re-init the notch ToF and probe it).
-  - [ ] Power off, reseat the CON27 cable at both ends; check it isn't pinched near the notch,
-        funnel or the new IMU mount. Power up, `u`.
-  - [ ] Still failing: swap the notch and rear L1X cables (CON27 <-> CON30). Fault moves to
-        index 3 = the sensor is dead (2 spare VL53L1X in the red box). Stays on index 2 = the
-        CON27 connector / cable / board supply.
-  - [ ] Optional: 3.3 V at the notch sensor's pins.
-  - [ ] Once fixed: remove the TEMP diagnostics (the `probeTofs()` boot prints in nav_main.cpp
-        and `tofReinitL1X()` / `r`); keep `u` and `i`.
-  - Only affects the funnel telemetry - pickup uses the inductive, weight-finding uses the
-    bottom ToFs + 8x8 - so it does NOT block avoidance tests.
+- [x] **Notch ToF fault (28/9): the sensor (or its cable) was faulty, not the port.** Swapping
+      CON27 <-> CON30 moved the fault with the sensor; a replacement on CON27 then ranged cleanly
+      (all 4 ToFs stayed at 0x34-0x37, no errors). Positions re-confirmed: weight in the notch =
+      59 mm (same as 25/9, so `FUNNEL_PRESENT_MM` 66 still holds), hand behind = rear 68 mm.
+      **Label the faulty sensor and keep it off the robot.** TEMP diagnostics removed; `u`/`i` kept.
 - [ ] **After the flange reprint:** ruler runs again (enctest GO, hold on). Read the steady
       `integral` from the traces (`T`) → `HEADING_I_START` in config.h (runs that started
       pre-loaded at ~-8 to -10 % were the straightest).
@@ -34,22 +23,19 @@ Work top to bottom. 🤖 = Claude can do it from the laptop once the Teensy is p
 - [x] **First wall test (28/9, log `docs/testdata/2026-09-28_nav_wall_test.log`):** drove at a
       low box from ~68 cm; 8x8 closure matched the encoders (418 vs 435 mm); at ~25 cm it turned
       LEFT towards the open side (correct direction - motor fix confirmed); GO-stop worked.
-- [ ] **IMU heading frozen in nav:** `hdg` read 0.0 for the whole wall test despite turning both
-      ways (worked in WAIT on the first nav boot; one boot said "IMU not found"). The IMU is
-      flaky on `Wire` - check together with the notch ToF fault (same bus). Heading hold was
-      effectively OFF in that run.
-  - [ ] **Hypothesis: 3.3 V brownout, not the I2C bus.** One cause fits both faults: the notch ToF
-        resets the moment it starts ranging (current pulses), and a BNO055 that browns out
-        reboots into CONFIG mode where its heading output stops updating (= constant 0.0 while
-        the code still thinks it's fine). Heading worked in WAIT (motors off), froze during the
-        run (motors on). Both faults appeared after the IMU was fitted (extra load / disturbed
-        cables). Nothing run in software could have caused it.
-  - [ ] Test: on blocks, motors on (enctest `f`), watch the BNO055 operating mode (reg 0x3D,
-        IMUPLUS = 0x08) + the notch ToF; check sensor power/ground cables and the 3.3 V at the
-        sensors under motor load.
-  - [ ] Software safety net regardless: detect a BNO055 reset (mode register != IMUPLUS) and
-        re-init it keeping the heading continuous; same idea for a ToF that falls back to 0x29.
-        A sensor rebooting mid-round must not blind the robot.
+- [x] **IMU heading frozen in nav (28/9): findings.**
+  - The `i` I2C scan itself rebooted the BNO055 (3/3): its empty address-only write to 0x28.
+    Fixed: the scan skips reserved addresses and checks the BNO055 by chip-ID read.
+  - With the faulty notch ToF unplugged: 0 IMU resets at idle **and** over 20 s of driving on
+    blocks, so motor load isn't browning it out. Most likely cause of the wall-test freeze =
+    the faulty notch ToF rebooting over and over and dragging the shared 3.3 V.
+  - Safety net in: every IMU read checks OPR_MODE; a reboot is logged (`imuRst`), put back in
+    IMUPLUS and the heading carries on from its last value. Telemetry: `imuMode`, `imuRst`.
+  - Boot-time I2C bus clear added for both buses (a sensor left mid-byte by a Teensy reset
+    hung setup once inside the 8x8 init).
+- [ ] **Heading live check:** turn the robot ~90 deg by hand while logging `hdg` (on blocks it
+      can't rotate, so the load test only proved "no reset"). Then watch `hdg` / `imuRst` on the
+      next floor run with the new notch ToF fitted.
 - [ ] **Low box: hit it, then read it as a weight.** Closing to 258 mm (turn is 250), the box
       dropped BELOW the band's view (reading jumped back to 353/401 mm), so it carried on and
       touched before turning. Then: after the turn it went to APPROACH / TURN_R / ESCAPE chasing

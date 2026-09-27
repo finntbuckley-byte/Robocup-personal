@@ -99,6 +99,10 @@ const bool TOF_SHORT_MODE[TOF_COUNT] = { false, false, true, false };
 // CON35) and the XSHUT expander (via I2C In CON26) matter here.
 // TODO(verify): run wirefind - its report names the bus for both. RAW I2C0 =
 // Wire, RAW I2C1 = Wire1.
+// Teensy 4.0 pins of the two RAW I2C buses - used by the boot-time bus clear
+const uint8_t I2C0_SDA_PIN = 18, I2C0_SCL_PIN = 19;   // Wire
+const uint8_t I2C1_SDA_PIN = 17, I2C1_SCL_PIN = 16;   // Wire1
+
 #define TOF_WIRE Wire
 #define SX_WIRE  Wire
 
@@ -324,6 +328,10 @@ const uint8_t IMU_ADDR = 0x28;          // BNO055 default (0x29 if its ADR pin i
 const int IMU_HEADING_SIGN = +1;
 const int IMU_GYRO_SIGN    = -1;
 const unsigned long IMU_READ_MS = 20;   // 50 Hz
+// after a detected BNO055 reboot, hold the last heading this long while it
+// switches back to IMUPLUS and the fusion restarts (datasheet: ~7ms mode
+// switch; the extra margin lets the first fused samples settle)
+const unsigned long IMU_RECOVER_MS = 100;
 
 // Heading hold (imu.cpp headingHoldSteer): PID,
 //   steer % = KP*err + KI*integral(err) - KD*rate

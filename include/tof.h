@@ -22,7 +22,6 @@ void tofUpdate();
 
 bool tofOk(int index);     // sensor initialised and answering
 bool rearBlocked();
-void tofPrintRaw();
-bool tofReinitL1X(int i);   // TEMP diagnostic - re-init an L1X stuck at 0x29         // diagnostics: raw mm + status + data age per sensor
+void tofPrintRaw();        // diagnostics ('u'): raw mm + status + data age + I2C error per sensor
 
 #endif /* __TOF_H */

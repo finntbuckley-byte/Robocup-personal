@@ -63,7 +63,39 @@ static void probeTofs(const char *when)
   Serial.println();
 }
 
-// live I2C scan of both buses ('i') - who answers where right now
+// I2C bus clear, run BEFORE Wire.begin(). Sensors keep their power across a
+// Teensy reset / re-flash, so one caught mid-byte can hold SDA low forever
+// and lock the bus (2026-09-28: the SEN0628 hung setup inside its first
+// transfer after repeated re-flashes). Clocking SCL up to 9 times lets the
+// stuck chip finish its byte, then a STOP releases the bus. Returns true if
+// SDA was stuck (worth logging - it means something reset mid-transfer).
+static bool i2cBusClear(uint8_t sdaPin, uint8_t sclPin)
+{
+  pinMode(sdaPin, INPUT_PULLUP);
+  pinMode(sclPin, OUTPUT_OPENDRAIN);
+  digitalWrite(sclPin, HIGH);
+  delayMicroseconds(10);
+  bool wasStuck = (digitalRead(sdaPin) == LOW);
+
+  for (int i = 0; i < 9 && digitalRead(sdaPin) == LOW; i++)
+  {
+    digitalWrite(sclPin, LOW);  delayMicroseconds(10);
+    digitalWrite(sclPin, HIGH); delayMicroseconds(10);
+  }
+  // STOP: SDA low -> high while SCL is high
+  pinMode(sdaPin, OUTPUT_OPENDRAIN);
+  digitalWrite(sdaPin, LOW);  delayMicroseconds(10);
+  digitalWrite(sclPin, HIGH); delayMicroseconds(10);
+  digitalWrite(sdaPin, HIGH); delayMicroseconds(10);
+  pinMode(sdaPin, INPUT);
+  pinMode(sclPin, INPUT);
+  return wasStuck;
+}
+
+// live I2C scan of both buses ('i') - who answers where right now.
+// Valid 7-bit range ONLY: 0x00-0x07 and 0x78-0x7F are reserved (general
+// call, CBUS, Hs-mode master codes, 10-bit prefix). Probing them rebooted
+// the BNO055 every time (2026-09-28: 3/3 scans -> IMU RESET).
 static void i2cScan()
 {
   TwoWire *buses[2] = { &Wire, &Wire1 };
@@ -71,8 +103,17 @@ static void i2cScan()
   for (int b = 0; b < 2; b++)
   {
     Serial.print(names[b]); Serial.print(":");
-    for (uint8_t a = 1; a < 127; a++)
+    for (uint8_t a = 0x08; a <= 0x77; a++)
     {
+      // never send the BNO055 an empty (address-only) write - see below
+      if (buses[b] == &IMU_WIRE && a == IMU_ADDR)
+      {
+        IMU_WIRE.beginTransmission(IMU_ADDR); IMU_WIRE.write((uint8_t)0x00);   // CHIP_ID register
+        bool idOk = IMU_WIRE.endTransmission(false) == 0 &&
+                    IMU_WIRE.requestFrom(IMU_ADDR, (uint8_t)1) == 1 && IMU_WIRE.read() == 0xA0;
+        if (idOk) { Serial.print(" 0x"); Serial.print(a, HEX); Serial.print("(BNO055)"); }
+        continue;
+      }
       buses[b]->beginTransmission(a);
       if (buses[b]->endTransmission() == 0) { Serial.print(" 0x"); Serial.print(a, HEX); }
     }
@@ -97,7 +138,7 @@ static bool telemetryOn = true;
 
 static void printTelemetryHeader()
 {
-  Serial.println("ms\tround\tmode\tBL\tBR\tUP\tREAR\tX8L\tX8R\tIRL\tIRR\tfun\tind\tW\tpicks\treal\tdummy\tonb\trej\tdrvL\tdrvR\todo\todoRaw\tslip\tstall\thdg\tgoD\tgoA");
+  Serial.println("ms\tround\tmode\tBL\tBR\tUP\tREAR\tX8L\tX8R\tIRL\tIRR\tfun\tind\tW\tpicks\treal\tdummy\tonb\trej\tdrvL\tdrvR\todo\todoRaw\tslip\tstall\thdg\timuMode\timuRst\tgoD\tgoA");
 }
 
 static void printTelemetry()
@@ -140,6 +181,8 @@ static void printTelemetry()
   Serial.print(odomStalled() ? 1 : 0);  Serial.print('\t');
   if (imuOk()) Serial.print(imuHeadingDeg(), 1); else Serial.print('-');   // + = right of start
   Serial.print('\t');
+  Serial.print("0x"); Serial.print(imuOprMode(), HEX); Serial.print('\t');   // 0x8 = IMUPLUS, 0x0 = rebooted
+  Serial.print(imuResetCount());        Serial.print('\t');
   // raw GO pin, digital + 10-bit analog - bring-up diagnostic
   if (PIN_GO >= 0) { Serial.print(digitalRead(PIN_GO)); Serial.print('\t'); Serial.println(analogRead(PIN_GO)); }
   else             { Serial.println("-\t-"); }
@@ -156,10 +199,6 @@ static void handleSerial()
     case 'g': x8PrintGrid(); break;
     case 'u': tofPrintRaw(); break;
     case 'i': i2cScan(); probeTofs("now"); break;
-    case 'r':
-      Serial.print("re-init notch ToF: "); Serial.println(tofReinitL1X(TOF_UPRIGHT) ? "ok" : "FAILED");
-      probeTofs("just after re-init");
-      break;
     case 't': telemetryOn = !telemetryOn; if (telemetryOn) printTelemetryHeader(); break;
     case 'x': killed = true; driveHardStop(); Serial.println("!!! KILLED - reset to run again"); break;
     default: break;
@@ -177,18 +216,17 @@ void setup()
   collection_init();     // crane parked at AT_REST, magnets off
   gate_init();           // Herkulex flap on Serial2 (CON66)
 
+  if (i2cBusClear(I2C0_SDA_PIN, I2C0_SCL_PIN)) Serial.println("!! Wire (I2C0) was stuck - bus cleared");
+  if (i2cBusClear(I2C1_SDA_PIN, I2C1_SCL_PIN)) Serial.println("!! Wire1 (I2C1) was stuck - bus cleared");
   Wire.begin();  Wire.setClock(400000);
   Wire1.begin(); Wire1.setClock(400000);
 
   Serial.println("\n--- RoboCup G23 nav build ---");
   tofInit();
-  probeTofs("after tofInit");
   x8Init();              // blocks ~5s setting 8x8 mode
-  probeTofs("after x8Init");
   irSensorsInit();
   odomInit();
   Serial.println(imuInit() ? "IMU ok (BNO055, IMUPLUS)" : "!! IMU not found - no heading hold");
-  probeTofs("after imuInit");
   funnelSensorInit();
   roundInit();
 
