@@ -397,7 +397,7 @@ void navigationUpdate()
     case MODE_ESCAPE:
       if (held < ESCAPE_REV_MS)
       {
-        if (rearBlocked()) stopMotors();
+        if (rearBlocked()) driveHardStop();
         else               driveReverse();
       }
       else if (escapeSpinDir < 0) turnLeft();
@@ -456,5 +456,5 @@ void navigationUpdate()
 
   // ---- universal rear guard: never reverse into something we can see ----
   if (isReversing() && rearBlocked())
-    stopMotors();
+    driveHardStop();      // no soft stop when about to back into something
 }

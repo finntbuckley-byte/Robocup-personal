@@ -24,7 +24,7 @@
 //
 //  INDUCTIVE WIRING: LJ18A3-8-Z/BY -> inductive level-shift board -> CON70
 //  (A6Z, pin 20). NPN sensors pull LOW on metal; INDUCTIVE_ACTIVE_LOW in
-//  config.h matches Inductive_sensor.cpp's tested METALLIC = 0.
+//  config.h matches the partner's original tested METALLIC = 0.
 //
 //  TO TIE THIS TO A SPECIFIC PICKUP CYCLE instead of running continuously:
 //  add an "armed" flag here, set true a fixed delay after collection_start()

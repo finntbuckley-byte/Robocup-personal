@@ -8,3 +8,6 @@
 .DS_Store
 Thumbs.db
 *.bak
+
+# 151 MB - kept locally for figures, text copy is docs/Parts_Summary_2026B.md
+docs/Parts_Summary_2026B.pdf

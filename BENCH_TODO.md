@@ -13,10 +13,10 @@ Work top to bottom. 🤖 = Claude can do it from the laptop once the Teensy is p
 - [x] Hold steel at the inductive sensor (`p`) and check pin 20 reads **low** for metal. (done 25/9: ~500 metal, ~3485 clear)
 - [x] **Pin 28 clash** (done 25/9: crane CON67, gate CON66 → Serial2): find where the crane servo is plugged in. Recommended fix: move the Herkulex
       cable from CON67 to **CON66**, then 🤖 set `gate.cpp` to `Serial2`.
-- [ ] 🤖 **First nav run**: `pio run -e nav -t upload`. Check all 4 ToFs and the 8×8 report `ok`.
-- [ ] 🤖 Press `g` to print the 8×8 grid, then set its orientation (`X8_COL_SIGN`, `X8_ROW_FLIP`) and
+- [x] (done 25/9, all ok) 🤖 **First nav run**: `pio run -e nav -t upload`. Check all 4 ToFs and the 8×8 report `ok`.
+- [x] (done 25/9: rows r2–r4) 🤖 Press `g` to print the 8×8 grid, then set its orientation (`X8_COL_SIGN`, `X8_ROW_FLIP`) and
       obstacle rows (`X8_BAND_LO/HI`), which must see walls but not floor weights.
-- [ ] 🤖 Read the empty-funnel `UP` value in the telemetry and set `FUNNEL_PRESENT_MM` below it.
+- [x] (done 25/9: 66 mm) 🤖 Read the empty-funnel `UP` value in the telemetry and set `FUNNEL_PRESENT_MM` below it.
 - [x] Speed-ramp test: check the 68% fwd / 73% rev pulse caps. (25/9: team confirmed max 1950 fwd / 1050 rev µs, caps match) Raise them in `config.h` if the tracks
       clearly run faster above that.
 - [ ] Check the tracks turn the right way: motor 1 = left, motor 2 = right.
@@ -60,6 +60,10 @@ Flash `nav`, robot on blocks, say go before pressing GO. 🤖 logs each one.
 
 ## 3. On the floor  (waiting on a printed part to improve motion)
 - [ ] Obstacle avoidance on its own. `x` kills the motors.
+- [ ] **Raise `DRIVE_SCALE_PCT` back to 100** (`config.h`, currently 50 = half the usable pulse
+      range, a safety limiter for first floor tests). Once avoidance behaves, step 50 → 75 → 100 and
+      retest avoidance at each step: stopping distance grows with speed, so the 8×8 thresholds may
+      need lengthening. Time 1 m at 50 and at 100 for the report's speed figure.
 - [ ] **Does the V-notch swing actually clear a rejected object?** (REJECT = reverse ~10 cm, pivot,
       ignore the spot 4 s.) The team isn't convinced it works, so test it with a plastic dummy and a
       knocked-over weight. Tune `REJECT_REVERSE_MS` / pivot time / `REJECT_SUPPRESS_MS`. If objects
@@ -73,8 +77,20 @@ Flash `nav`, robot on blocks, say go before pressing GO. 🤖 logs each one.
       avoidance success rate.
 
 ## 4. Later
-- [ ] Wire the **GO button** (e.g. A0Z, CON68) and set `PIN_GO`.
+- [x] (done, wired) Wire the **GO button** (e.g. A0Z, CON68) and set `PIN_GO`.
 - [ ] Fit the IMU and write homing + delivery. Then turn on `USE_HOMING`.
 - [ ] Gate/flap sorting logic: keep metal, drop dummies.
-- [ ] Drive encoders via the encoder IO board, for homing odometry.
-- [ ] Add `Parts_Summary_2026B.pdf` / `.md` to `docs/`.
+- [ ] **Drive encoders (27/9)**: `odometry.cpp` + `enctest` env.
+  - [x] Wired: Encoder IO board on **CON55 (D2–D5)**, L A/B = 2/3, R A/B = 4/5 (one board, both motors).
+        Found + fixed on the way: motor channel 1 was driving the RIGHT track (leads swapped at the
+        driver), and the left motor then ran backwards (polarity flipped at its screw terminal).
+  - [x] Signs (enctest, on blocks): `ENC_L_SIGN = -1`, `ENC_R_SIGN = 1` - forward counts up on both.
+  - [x] `ENC_COUNTS_PER_M = 15430`: 5 GO-button runs of ~63 cm at cruise, sd 0.4% (not the arena floor).
+  - [ ] Recheck counts/m on the **arena floor** (1–2 runs) when it's free.
+  - [ ] **Forward trim at cruise:** those runs turned **right ~9°** (6.8–12.2°) and drifted ~5 cm right
+        over 63 cm, with `DRIVE_TRIM_L_FWD` 0.90. Part of that was the jolt from the instant stop; the
+        soft stop (`DRIVE_DECEL_MS`) is now in. Rerun 3× with enctest (GO) and lower the left trim
+        if it still turns right. The IMU heading hold will take out what's left.
+  - [ ] Slip check (`nav`, telemetry `odo`/`odoRaw`/`slip`): drive into a wall and hold →
+        `odoRaw` keeps climbing, `odo` stops, `slip` = 1. Tune `ODOM_SLIP_*` if not.
+- [x] Add `Parts_Summary_2026B.pdf` / `.md` to `docs/` (27/9; the 151 MB PDF is git-ignored, the `.md` is committed).

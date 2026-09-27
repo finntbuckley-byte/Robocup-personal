@@ -1,6 +1,6 @@
-# CLAUDE.md — Group 23 RoboCup Robot (ENMT301, UC 2026)
+# AGENTS.md — Group 23 RoboCup Robot (ENMT301, UC 2026)
 
-Context file for Claude Code. Read this first every session. Items marked **UNVERIFIED** are
+Context file for Codex. Read this first every session. Items marked **UNVERIFIED** are
 known-uncertain: check the hardware/schematic or ask before relying on them, and never
 "fix" them silently by picking one option.
 

@@ -5,7 +5,7 @@
  *  Serial monitor:  pio device monitor -b 115200     (press '?' for the menu)
  *
  *  Only compiled when NAV_BUILD is defined ([env:nav] sets it), so it never
- *  clashes with main.cpp (the partner's collection test, default env).
+ *  clashes with the other envs' setup()/loop().
  *
  *  LOOP STRUCTURE (nothing here blocks except the 8x8 read, ~20-40ms every
  *  X8_READ_MS - see x8.cpp):
@@ -39,6 +39,7 @@
 #include "navigation.h"
 #include "round.h"
 #include "gate.h"
+#include "odometry.h"
 
 static bool killed = false;          // 'x' on the serial menu - bench safety only
 
@@ -56,7 +57,7 @@ static bool telemetryOn = true;
 
 static void printTelemetryHeader()
 {
-  Serial.println("ms\tround\tmode\tBL\tBR\tUP\tREAR\tX8L\tX8R\tIRL\tIRR\tfun\tind\tW\tpicks\treal\tdummy\tonb\trej\tdrvL\tdrvR\tgoD\tgoA");
+  Serial.println("ms\tround\tmode\tBL\tBR\tUP\tREAR\tX8L\tX8R\tIRL\tIRR\tfun\tind\tW\tpicks\treal\tdummy\tonb\trej\tdrvL\tdrvR\todo\todoRaw\tslip\tstall\tgoD\tgoA");
 }
 
 static void printTelemetry()
@@ -93,6 +94,10 @@ static void printTelemetry()
   Serial.print(rejectedCount());        Serial.print('\t');
   Serial.print(lastDriveLeftPct());     Serial.print('\t');
   Serial.print(lastDriveRightPct());    Serial.print('\t');
+  Serial.print(odomDistanceMM(), 0);    Serial.print('\t');   // slip-corrected mm
+  Serial.print(odomRawDistanceMM(), 0); Serial.print('\t');   // encoders only
+  Serial.print(odomSlipping() ? 1 : 0); Serial.print('\t');
+  Serial.print(odomStalled() ? 1 : 0);  Serial.print('\t');
   // raw GO pin, digital + 10-bit analog - bring-up diagnostic
   if (PIN_GO >= 0) { Serial.print(digitalRead(PIN_GO)); Serial.print('\t'); Serial.println(analogRead(PIN_GO)); }
   else             { Serial.println("-\t-"); }
@@ -108,7 +113,7 @@ static void handleSerial()
     case '?': printHelp(); break;
     case 'g': x8PrintGrid(); break;
     case 't': telemetryOn = !telemetryOn; if (telemetryOn) printTelemetryHeader(); break;
-    case 'x': killed = true; stopMotors(); Serial.println("!!! KILLED - reset to run again"); break;
+    case 'x': killed = true; driveHardStop(); Serial.println("!!! KILLED - reset to run again"); break;
     default: break;
   }
 }
@@ -131,6 +136,7 @@ void setup()
   tofInit();
   x8Init();              // blocks ~5s setting 8x8 mode
   irSensorsInit();
+  odomInit();
   funnelSensorInit();
   roundInit();
 
@@ -146,6 +152,7 @@ void loop()
   tofUpdate();
   x8Update();
   irSensorsUpdate();
+  odomUpdate();          // after the 8x8 / rear ToF - the slip check reads them
 
   // 2. weight candidate
   weightDetectUpdate();
@@ -159,9 +166,10 @@ void loop()
 
   // 5. round + navigation
   roundUpdate();
-  if (roundJustStarted()) navigationInit();
+  if (roundJustStarted()) { navigationInit(); odomReset(); }   // distance measured from the start position
 
-  if (killed || !roundRunning()) stopMotors();
+  if (killed)             driveHardStop();
+  else if (!roundRunning()) stopMotors();
   else                           navigationUpdate();
 
   // 6. telemetry

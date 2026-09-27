@@ -14,7 +14,8 @@ void driveForward();
 void driveReverse();
 void turnLeft();
 void turnRight();
-void stopMotors();
+void stopMotors();        // soft stop: ramps down over DRIVE_DECEL_MS, call every loop
+void driveHardStop();     // instant stop, no ramp - kill / rear guard only
 bool isReversing();
 int  lastDriveLeftPct();    // last commanded signed % (before pulse scaling)
 int  lastDriveRightPct();

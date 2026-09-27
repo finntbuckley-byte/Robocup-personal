@@ -1,17 +1,16 @@
 #include <Arduino.h>
 #include <Servo.h>
 #include "collection.h"
-#include "Inductive_sensor.h"
 #include "smooth_servo.h"
 #include "config.h"   // CRANE_* angles and speeds
 
-#define MAG1 26
-#define MAG2 27
+#define MAG1 PIN_MAG1        // pins now live in config.h
+#define MAG2 PIN_MAG2
 
-#define BIG_SERVO 28
+#define BIG_SERVO PIN_CRANE_SERVO
 #define SERVODELAY1 1200 //update after testing, motion from starting position to weight pickup
 #define SERVODELAY2 900 //update after testing, motion from weight pickup to weight drop
-#define SERVODELAY3 1500 //update after testing, motion from weight drop back to holding position
+#define SERVODELAY3 400 //motion from weight drop back to holding position. Was 1500: the ~0.3 s rest move finished long before, so the robot just sat still
 #define WEIGHTDROPDELAY 1000  //update after testing, time until weight is safely dropped
 
 Servo bigServo;

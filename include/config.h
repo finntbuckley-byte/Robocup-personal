@@ -23,8 +23,7 @@
 //    Not fitted: IMU (left out for now), TCS34725 colour sensor (dropped).
 //    The old top-front + corner ToFs are gone - the SEN0628 does their job.
 //
-//  BUILDS: [env:nav] = full navigation (nav_main.cpp). The default env is
-//  still the partner's collection test (main.cpp).
+//  BUILDS: [env:nav] = full navigation (nav_main.cpp), the default env.
 //
 //  ARCHITECTURE: same DISCRETE (bang-bang+hysteresis) / CONTINUOUS
 //  (proportional/PD) split used throughout this project. See navigation.cpp
@@ -186,7 +185,7 @@ const int FUNNEL_PRESENT_MM = 66;
 // INDUCTIVE SENSOR  -  metal (real weight) vs non-metal (dummy) at the
 // funnel end. LJ18A3-8-Z/BY -> inductive interface/level-shift board ->
 // CON70 (A6Z) = pin 20, read as digital. Active LOW matches
-// Inductive_sensor.cpp's tested METALLIC = 0.
+// the partner's original tested METALLIC = 0.
 // ---------------------------------------------------------------------------
 const int  PIN_INDUCTIVE        = 20;     // CON70 (A6Z)
 const bool INDUCTIVE_ACTIVE_LOW = true;
@@ -225,16 +224,100 @@ const int REPOSITION_SPEED_PCT = 55;
 const unsigned long REPOSITION_TURN_MS = 700;
 
 // DFR0513 max pulses confirmed by the team 2026-09-25: 1950us forward,
-// 1050us reverse. motor.cpp maps 100% to 1.0/2.0 ms, so drive() SCALES its
-// -100..100 command into these limits (keeps steering differential at full
-// cruise). From motor.cpp's mapping (integer maths, so 1us inside the limit):
-//   fwd: 1842 + 68*158/100 = 1949 us     rev: 1188 - 73*188/100 = 1051 us
-const int MOTOR_MAX_FWD_PCT = 68;
-const int MOTOR_MAX_REV_PCT = 73;
+// 1050us reverse. motor.cpp now maps 100% to exactly those limits itself
+// (FULL_FORWARD 1950 / FULL_BACKWARD 1050), so no extra cap is needed here.
+// Was 68/73 when motor.cpp mapped 100% to 2.0/1.0 ms; keeping those with the
+// new motor.cpp double-limited top speed to ~1915/1088 us.
+const int MOTOR_MAX_FWD_PCT = 100;
+const int MOTOR_MAX_REV_PCT = 100;
 
 // Scales EVERY drive command (after navigation, before the pulse caps).
 // 50 for first floor tests; set back to 100 once avoidance behaves.
 const int DRIVE_SCALE_PCT = 50;
+
+// Per-track, per-direction trims: multiply that track's percent (after
+// scaling) so the robot drives straight open-loop. Measured on the ground
+// 2026-09-27, one speed each:
+//   forward: left x0.90 -> ~1 cm deviation over 1 m
+//   reverse: right x0.98 -> "mostly straight"
+// TODO(verify): measured with the OLD motor.cpp minimums (1842/1188 us);
+// MIN_FORWARD/MIN_BACKWARD are now 1730/1350, so recheck both. The IMU
+// heading hold will trim out what these don't.
+// 0.90 still turned RIGHT ~10 deg over 65 cm at cruise (soft stop, 3 runs),
+// so 0.86 is being tried. Resolution: drive() rounds to whole percent, so at
+// DRIVE_SCALE_PCT 50 each ~0.02 of trim = 1% = ~2 us of pulse (0.86 -> 43%,
+// 0.88 -> 44%, 0.90 -> 45%).
+const float DRIVE_TRIM_L_FWD = 0.86f;
+const float DRIVE_TRIM_R_FWD = 1.00f;
+const float DRIVE_TRIM_L_REV = 1.00f;
+const float DRIVE_TRIM_R_REV = 0.98f;
+
+// Soft start / soft stop: time for a track to ramp 0 -> 100% (speeding up)
+// and 100% -> 0 (slowing down). A direction change ramps down to 0 first,
+// then up the other way. The soft stop was added 2026-09-27: instant stops
+// jolted the robot and knocked its heading off at the end of every run.
+// driveHardStop() skips the ramp - used for the 'x' kill and the rear guard.
+// NOTE: the soft stop adds stopping distance (~2 cm at DRIVE_SCALE_PCT 50,
+// more when that goes up), and timed moves (REJECT reverse, REPOSITION turn)
+// change slightly - retune those on the floor.
+const unsigned long DRIVE_RAMP_MS  = 300;
+const unsigned long DRIVE_DECEL_MS = 200;
+
+// ---------------------------------------------------------------------------
+// ODOMETRY  -  drive-motor encoders via the Encoder IO board (510)
+// ---------------------------------------------------------------------------
+// Distance travelled for homing. Heading comes from the IMU, NOT from the
+// encoders (tracks skid in every turn).
+// TODO(verify): pins. The parts summary says a DIGITAL port carries 4 lines,
+// so one 8-pin cable should carry both encoders' A/B. Assumed DIGITAL RAW2
+// (CON55) = D2-D5. Check with `pio run -e enctest -t upload`: turn each
+// track by hand and make sure the right column counts.
+const int PIN_ENC_L_A = 2;
+const int PIN_ENC_L_B = 3;
+const int PIN_ENC_R_A = 4;
+const int PIN_ENC_R_B = 5;
+// +1/-1 so driving FORWARD counts UP on both tracks. The motors are mirrored,
+// so one side probably needs -1. TODO(verify) with enctest.
+const int ENC_L_SIGN = -1;   // confirmed 2026-09-27 (enctest, after fixing the left motor polarity)
+const int ENC_R_SIGN = 1;    // confirmed 2026-09-27
+// Encoder counts (4x quadrature) per metre of travel (mean of both tracks).
+// Measured 2026-09-27 with enctest at cruise (100% x DRIVE_SCALE_PCT 50):
+//   hard stop, 5 runs ~63 cm: 15386-15535 (mean 15430) - robot slid a bit
+//     after the tracks stopped, so distance without counts -> reads low
+//   soft stop, 3 runs ~65 cm: 15517-15755 (mean 15636)  <- used
+// Not the arena floor (it was busy) - recheck there if distances look off.
+const float ENC_COUNTS_PER_M = 15640.0f;
+
+// Slip catching. While driving straight, the encoder travel is checked every
+// ODOM_SLIP_WINDOW_MS against how much closer the thing ahead (8x8) - or
+// behind when reversing (rear ToF) - actually got. Tracks spinning against a
+// wall / the other robot show encoder travel with little closure: that
+// window counts only the ToF closure instead. Turns aren't checked (heading
+// is the IMU's job; forward distance during a spin is ~0 anyway).
+// KNOWN LIMIT: something ahead that moves away (the other robot) looks like
+// slip, so distance is under-counted then - the safe direction for homing.
+const unsigned long ODOM_SLIP_WINDOW_MS   = 300;
+const float    ODOM_SLIP_MIN_TRAVEL_MM    = 40.0f;  // encoders must claim this much before judging
+const float    ODOM_SLIP_RATIO            = 0.5f;   // closure < ratio x encoder travel = slipping
+const uint16_t ODOM_SLIP_MAX_RANGE_MM     = 1200;   // only trust closure on something this close
+const int      ODOM_STRAIGHT_TOL_PCT      = 15;     // |cmdL - cmdR| within this = straight
+// Stall: commanded to move but the encoders haven't changed for this long
+// (tracks jammed, or motor/encoder fault). Reported only - nav doesn't act on it yet.
+const unsigned long ODOM_STALL_MS         = 400;
+const int      ODOM_STALL_MIN_PCT         = 20;
+
+// ---------------------------------------------------------------------------
+// IMU  -  BNO055 (SEN0253), heading only
+// ---------------------------------------------------------------------------
+// CON61 = RAW I2C0 -> Wire (fitted 2026-09-27, mid-robot, flat, board X arrow
+// pointing BACKWARDS - irrelevant for heading, which is rotation about the
+// vertical axis). Run in IMUPLUS (gyro + accel, no magnetometer: the motors
+// and electromagnets would corrupt it). Heading is relative - zeroed at GO.
+#define IMU_WIRE Wire
+const uint8_t IMU_ADDR = 0x28;          // BNO055 default (0x29 if its ADR pin is high)
+// +1 if a clockwise turn (seen from above) = heading going UP, else -1, so
+// that in firmware + = turned RIGHT. TODO(verify) with imutest.
+const int IMU_HEADING_SIGN = +1;
 
 // ---------------------------------------------------------------------------
 // WEIGHT DETECTION  (bottom ToF vs 8x8 obstacle band, same side)
@@ -298,11 +381,19 @@ const float CRANE_DROP_DPS     = 60.0f;
 const int   CRANE_REST_ANGLE   = 70;     // rest angle + speed confirmed by the partner 2026-09-25
 const float CRANE_REST_DPS     = 100.0f;
 
+// Crane pins (used by collection.cpp).
+const int PIN_CRANE_SERVO = 28;   // CON67
+// Electromagnets via the FET board. 26/27 (CON74/75) have NO PWM on the
+// Teensy 4.0. Planned move to 24/25 (CON72/73) for a PWM holding level - see
+// BENCH_TODO.md 2d. Change these two lines when the wires move.
+const int PIN_MAG1 = 26;          // CON74
+const int PIN_MAG2 = 27;          // CON75
+
 // eased servo moves (smooth_servo.cpp) - used by the crane
 const unsigned long SERVO_MIN_MOVE_MS     = 150;  // floor for tiny moves
 const unsigned long SERVO_STEP_INTERVAL_MS = 15;  // angle update period during a move
 
-// a full crane cycle is ~4.6s (SERVODELAY1+2 + DROP + SERVODELAY3); give up
+// a full crane cycle is ~3.9s (SERVODELAY1+2 + DROP + SERVODELAY3); give up
 // waiting after this so a stuck crane can't park the robot for the round
 const unsigned long PICKUP_TIMEOUT_MS = 8000;
 

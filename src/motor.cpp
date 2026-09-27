@@ -2,11 +2,11 @@
 #include <Arduino.h>
 
 // PPM pulse widths for DFR0513 (see datasheet)
-#define FULL_BACKWARD  1000
-#define MIN_BACKWARD   1188  //62% of the full pulse was min you would want to run the motor at
+#define FULL_BACKWARD  1050
+#define MIN_BACKWARD   1350  // lowest pulse that still moves the robot, re-measured 2026-09-27 (was 1188)
 #define NEUTRAL       1500   // center of 1470-1560 stop deadband
-#define MIN_FORWARD  1842
-#define FULL_FORWARD 2000
+#define MIN_FORWARD  1730    // re-measured 2026-09-27 (was 1842)
+#define FULL_FORWARD 1950
 
 #define MOTOR_1_PIN 0   // this is the left motor
 #define MOTOR_2_PIN 1   // this is the right motor
