@@ -9,11 +9,14 @@
 //    Pickup: swing-arm crane + 2 electromagnets (collection.cpp/h, PARTNER'S
 //            CODE - minimally modified, exposes collection_busy()).
 //    Sensing (connector map from the physical board, 2026-09-24):
-//      4x ToF via SX1509 XSHUT lines (ToF connectors CON27-34 = XSHUT0-7):
+//      5x ToF via SX1509 XSHUT lines (ToF connectors CON27-34 = XSHUT0-7):
 //        bottom-left  VL53L0X  CON29  - weight detection / APPROACH steering
 //        bottom-right VL53L0X  CON28  - weight detection / APPROACH steering
-//        weight-detect (upright) CON27 - upright vs lying weight in the notch
+//        weight-detect (upright) CON27 - "bottom" of the lying-weight check
 //        rear         VL53L1X  CON30  - reversing clearance
+//        baseplate-top VL53L0X CON31  - "top" of the lying-weight check
+//                                       (2026-09-28: NOT YET FITTED, wiring
+//                                       in progress - see config.h TOF_TOP)
 //      1x SEN0628 8x8 ToF, front, CON64 (RAW I2C1 = Wire1) - obstacles
 //      2x analog IR (GP2Y0A21, white), side-facing: left CON24 (A9Z),
 //        right CON23 (A8Z)
@@ -42,12 +45,17 @@
 //
 //  PIN CONFIDENCE - read this before flashing:
 //    CONFIRMED   motor pins (motor.cpp), collection pins (collection.cpp),
-//                all 4 ToF XSHUT lines, SEN0628 port, side IR pins + L/R +
-//                part, inductive pin, gate on CON67 (connector map,
+//                the original 4 ToF XSHUT lines, SEN0628 port, side IR pins
+//                + L/R + part, inductive pin, gate on CON67 (connector map,
 //                2026-09-24).
 //    TODO(verify) ToF model on the weight-detect port; which RAW bus the ToF
 //                bus (CON35) and XSHUT expander (CON26) are cabled to - the
 //                wirefind report answers both.
+//    UNCONFIRMED TOF_TOP (CON31/XSHUT4) - not physically wired yet
+//                (2026-09-28). Pin/address assignment is a proposal only;
+//                confirm with wirefind once it's connected, and bench-verify
+//                BOTTOM_PRESENT_MM/TOP_PRESENT_MM/LYING_CONFIRM_MS below
+//                before trusting them on the robot.
 // ============================================================================
 
 #include <Arduino.h>
@@ -68,7 +76,7 @@ const int ROBOT_HEIGHT_MM  = 170;
 const int WEIGHT_HEIGHT_MM = 70;
 
 // ---------------------------------------------------------------------------
-// ToF CHAIN  -  4 sensors, XSHUT via SX1509 @ 0x3F
+// ToF CHAIN  -  5 sensors, XSHUT via SX1509 @ 0x3F
 // ---------------------------------------------------------------------------
 const byte SX1509_ADDRESS = 0x3F;
 // re-addressed from 0x34 upward in index order - 0x30 would put index 3 on
@@ -80,20 +88,26 @@ const int TOF_BL      = 0;   // bottom-left  VL53L0X          CON29 / XSHUT2
 const int TOF_BR      = 1;   // bottom-right VL53L0X          CON28 / XSHUT1
 const int TOF_UPRIGHT = 2;   // weight-detect, across notch   CON27 / XSHUT0
 const int TOF_REAR    = 3;   // rear VL53L1X, long range      CON30 / XSHUT3
-const int TOF_COUNT   = 4;
+// baseplate-top, lying-weight reject   CON31 / XSHUT4 - NOT YET FITTED
+// (2026-09-28, proposed): bench-confirmed blind to a weight lying on its
+// side, unlike TOF_UPRIGHT which still sees it. See navigation.cpp
+// lyingWeightConfirmed(). Address 0x38 (TOF_ADDRESS_START + 4) is clear of
+// the OLED (0x3C) and both SX1509s (0x3E/0x3F).
+const int TOF_TOP     = 4;
+const int TOF_COUNT   = 5;
 
 // SX1509 XSHUT line for each index (connector CONn = XSHUT(n-27))
-const int XSHUT_TOF[TOF_COUNT] = { 2, 1, 0, 3 };
+const int XSHUT_TOF[TOF_COUNT] = { 2, 1, 0, 3, 4 };
 
 // sensor model at each index: 0 = VL53L0X (short), 1 = VL53L1X (long)
 // TODO(verify): weight-detect model - nav_test assumed a VL53L1X in short
 // mode; the wirefind report prints the real part per XSHUT line.
-const int TOF_TYPE[TOF_COUNT] = { 0, 0, 1, 1 };
+const int TOF_TYPE[TOF_COUNT] = { 0, 0, 1, 1, 0 };
 
 // VL53L1X distance mode per index (ignored for L0X): true = Short (to ~1.3m,
 // better in ambient light), false = Long (to ~4m). The notch sensor only
 // looks ~60-90mm, the rear wants range.
-const bool TOF_SHORT_MODE[TOF_COUNT] = { false, false, true, false };
+const bool TOF_SHORT_MODE[TOF_COUNT] = { false, false, true, false, false };
 
 // Which RAW I2C bus each sub-assembly is cabled to. Only the ToFs (via I2C In
 // CON35) and the XSHUT expander (via I2C In CON26) matter here.
@@ -447,6 +461,38 @@ const unsigned long METAL_REARM_CLEAR_MS = 500;     // metal still in the notch 
 const int  REJECT_REVERSE_PCT = 40;
 const unsigned long REJECT_REVERSE_MS  = 500;    // aim ~10cm clear of the notch
 const unsigned long REJECT_SUPPRESS_MS = 4000;   // ignore that spot for this long
+
+// ---------------------------------------------------------------------------
+// LYING-WEIGHT REJECT  -  top/bottom baseplate ToF pair (TOF_TOP, proposed,
+// see above) + the existing notch ToF (TOF_UPRIGHT) as "bottom". TOF_TOP is
+// bench-confirmed blind to a weight lying on its side; TOF_UPRIGHT still
+// sees it. So bottom-sees-something + top-sees-nothing, held steadily, means
+// "an object is here but not standing up" - reject it before creeping it
+// through the funnel, rather than waiting to find out at the inductive
+// sensor. See navigation.cpp lyingWeightConfirmed().
+//
+// This replaces the old inductive-gated, settle-timer-based back-away check
+// (uprightBackawayConfirmed(), now removed from navigation.cpp - the
+// UPRIGHT_BACKAWAY_* constants above are only used by the deferred notchtest
+// bench rig, BENCH_TODO.md 2e). The second sensor makes that settle-window
+// trick unnecessary: orientation now comes from an independent reading
+// instead of being inferred from how a distance changed over time, which is
+// what was causing real upright weights to get rejected too quickly.
+//
+// TODO(verify): NEITHER threshold has bench data yet - TOF_TOP doesn't
+// exist on the robot as of 2026-09-28. Once it's wired, characterise both
+// the same way FUNNEL_PRESENT_MM was: log raw mm for steel upright, plastic
+// upright, a lying weight, and empty, then set the thresholds from that.
+//   BOTTOM_PRESENT_MM is deliberately wider than FUNNEL_PRESENT_MM (66) -
+//   that one was tuned tight around steel-upright only for telemetry.
+//   Bench data has dummy-upright at 70-74mm and the 28/9 replacement-sensor
+//   lying-weight test at 110-149mm (vs empty 196-220mm in that same test);
+//   this needs to count all of those as "something's there".
+//   TOP_PRESENT_MM is a placeholder - pick a real value once you know the
+//   sensor's mounting height above the baseplate.
+const int BOTTOM_PRESENT_MM = 160;
+const int TOP_PRESENT_MM    = 80;
+const unsigned long LYING_CONFIRM_MS = 100;   // must read this way steadily before rejecting
 
 // ---------------------------------------------------------------------------
 // PD STEERING for APPROACH (mm imbalance -> % differential)

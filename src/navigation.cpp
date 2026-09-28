@@ -44,8 +44,16 @@
 //                cycle: metal GONE from the notch = success (noteCollected);
 //                metal STILL there = the grab missed -> retry up to
 //                MAX_PICKUP_TRIES, then give up.
-//      REJECT    creep ended with no metal (dummy / lying weight / nothing)
-//                -> reverse REJECT_REVERSE_MS, pivot away, suppress the spot.
+//      REJECT    two triggers, same outcome (reverse REJECT_REVERSE_MS,
+//                pivot away, suppress the spot):
+//                  - lyingWeightConfirmed(): the notch ToF sees something but
+//                    the baseplate-top ToF doesn't (bench-confirmed blind to
+//                    a weight lying on its side) - checked in FORWARD,
+//                    APPROACH and CREEP, so a lying weight is rejected as
+//                    soon as it's seen rather than after creeping into it.
+//                  - CREEP times out with no metal ever seen (dummy/nothing).
+//                No longer gated on the inductive sensor - that's PICKUP-only
+//                now (metalConfirmed()).
 //      REPOSITION  after a pickup, turn away from the spot, then resume.
 //
 //  ROUND (round.h): weights are only approached while roundWantsWeights() -
@@ -70,7 +78,6 @@ const int MODE_REPOSITION = 6;
 const int MODE_SCAN       = 7;
 const int MODE_CREEP      = 8;
 const int MODE_REJECT     = 9;
-const int MODE_BACK_AWAY  = 10;
 
 static int mode = MODE_FORWARD;
 static unsigned long modeStart = 0;
@@ -93,8 +100,7 @@ static int  lastWeightSide = 0;
 static int  rejectDir = 1;
 static int  rejectCount = 0;
 static unsigned long metalSince = 0;
-static unsigned long uprightNearSince = 0;
-static bool uprightBackawayLatched = false;
+static unsigned long lyingSince = 0;
 
 static void setMode(int m) { mode = m; modeStart = millis(); }
 
@@ -128,41 +134,25 @@ static bool metalConfirmed()
 
 static int roomierSide();
 
-// A close, fresh notch-ToF return only requests a back-away when the inductive
-// sensor does not detect metal. This catches close plastic/lying objects while
-// preserving the correctly seated steel-weight pickup path. Hysteresis prevents
-// retriggering until the object has moved clear.
-static bool uprightBackawayConfirmed()
+// TOF_TOP (baseplate-top, proposed - see config.h) is bench-confirmed blind
+// to a weight lying on its side; TOF_UPRIGHT (the notch ToF) still sees it.
+// So bottom-sees-something + top-sees-nothing, held steadily, means "an
+// object is here but not standing up" - reject it before creeping it
+// through the funnel. If the top sensor isn't up (not yet fitted, stale,
+// mid-recovery) this never fires, rather than treating "no top sensor" as
+// "definitely lying down" - that's what caused real weights to get rejected
+// before this sensor existed.
+static bool lyingWeightConfirmed()
 {
-  if (!tofOk(TOF_UPRIGHT)) { uprightNearSince = 0; return false; }
+  if (!tofOk(TOF_TOP) || !tofOk(TOF_UPRIGHT)) { lyingSince = 0; return false; }
 
-  if (tofUpright >= UPRIGHT_BACKAWAY_CLEAR_MM)
-  {
-    uprightBackawayLatched = false;
-    uprightNearSince = 0;
-    return false;
-  }
+  bool bottomSees = tofUpright < BOTTOM_PRESENT_MM;
+  bool topSees    = tofTop     < TOP_PRESENT_MM;
 
-  bool inBand = tofUpright >= UPRIGHT_BACKAWAY_MIN_MM &&
-                tofUpright <= UPRIGHT_BACKAWAY_MAX_MM;
-  if (!inBand || uprightBackawayLatched)
-  {
-    uprightNearSince = 0;
-    return false;
-  }
+  if (!bottomSees || topSees) { lyingSince = 0; return false; }
 
-  if (uprightNearSince == 0) uprightNearSince = millis();
-  return millis() - uprightNearSince >= UPRIGHT_BACKAWAY_CONFIRM_MS;
-}
-
-static void startUprightBackAway()
-{
-  uprightBackawayLatched = true;
-  uprightNearSince = 0;
-  repositionDir = x8Fresh() ? roomierSide() : -1;
-  Serial.print(">>> NOTCH OBJECT WITHOUT INDUCTIVE METAL: "); Serial.print(tofUpright);
-  Serial.println(" mm - backing away and turning");
-  setMode(MODE_BACK_AWAY);
+  if (lyingSince == 0) lyingSince = millis();
+  return millis() - lyingSince >= LYING_CONFIRM_MS;
 }
 
 int rejectedCount() { return rejectCount; }
@@ -180,7 +170,6 @@ const char* modeName()
     case MODE_REPOSITION: return "REPOSITION";
     case MODE_CREEP:      return "CREEP";
     case MODE_REJECT:     return "REJECT";
-    case MODE_BACK_AWAY:  return "BACK_AWAY";
     default:              return "SCAN";
   }
 }
@@ -276,12 +265,12 @@ static void startPickup()
   setMode(MODE_PICKUP);
 }
 
-static void startReject()
+static void startReject(const char *why)
 {
   rejectCount++;
   rejectDir = (lastWeightSide < 0) ? +1 : -1;
   Serial.print(">>> REJECT #"); Serial.print(rejectCount);
-  Serial.println(" - no metal at the notch (dummy / lying weight / nothing)");
+  Serial.print(" - "); Serial.println(why);
   setMode(MODE_REJECT);
 }
 
@@ -326,7 +315,7 @@ void navigationUpdate()
     {
       // a weight can end up in the notch without an approach (drove into it)
       if (wantWeights && metalConfirmed()) { pickupTries = 0; lastWeightSide = 0; startPickup(); }
-      else if (!inductiveMetalNow() && uprightBackawayConfirmed()) startUprightBackAway();
+      else if (wantWeights && lyingWeightConfirmed()) startReject("lying weight (top/bottom ToF)");
       else if (obstacleLeft() && obstacleRight())
       {
         escapeSpinDir = roomierSide();
@@ -390,10 +379,6 @@ void navigationUpdate()
       }
       break;
 
-    case MODE_BACK_AWAY:
-      if (held >= REJECT_REVERSE_MS + REPOSITION_TURN_MS) setMode(MODE_FORWARD);
-      break;
-
     case MODE_SCAN:
       if (wantWeights && metalConfirmed()) { pickupTries = 0; lastWeightSide = 0; startPickup(); }
       else if (wantWeights && weightFound) startApproach();
@@ -410,7 +395,7 @@ void navigationUpdate()
       if (!wantWeights) { setMode(MODE_FORWARD); break; }
 
       if (metalConfirmed()) { pickupTries = 0; startPickup(); break; }
-      if (!inductiveMetalNow() && uprightBackawayConfirmed()) { startUprightBackAway(); break; }
+      if (lyingWeightConfirmed()) { startReject("lying weight (top/bottom ToF)"); break; }
 
       if (odomStalled() && held > APPROACH_PROGRESS_MS) { abandonApproach("tracks stalled"); break; }
 
@@ -445,9 +430,9 @@ void navigationUpdate()
       if (avoidIfBlocked()) break;
       if (!wantWeights) { setMode(MODE_FORWARD); break; }
       if (metalConfirmed()) { pickupTries = 0; startPickup(); }
-      else if (!inductiveMetalNow() && uprightBackawayConfirmed()) startUprightBackAway();
+      else if (lyingWeightConfirmed()) startReject("lying weight (top/bottom ToF)");
       else if (weightFound && weightDistMM >= CREEP_START_MM) startApproach();   // re-acquired further out
-      else if (held > CREEP_MAX_MS) startReject();
+      else if (held > CREEP_MAX_MS) startReject("no metal at the notch (dummy / lying weight / nothing)");
       break;
 
     case MODE_PICKUP:
@@ -592,13 +577,6 @@ void navigationUpdate()
         drive(-REJECT_REVERSE_PCT, -REJECT_REVERSE_PCT);
       else
         drive(rejectDir * REPOSITION_SPEED_PCT, -rejectDir * REPOSITION_SPEED_PCT);
-      break;
-
-    case MODE_BACK_AWAY:
-      if (held < REJECT_REVERSE_MS)
-        drive(-REJECT_REVERSE_PCT, -REJECT_REVERSE_PCT);
-      else
-        drive(repositionDir * REPOSITION_SPEED_PCT, -repositionDir * REPOSITION_SPEED_PCT);
       break;
 
     case MODE_REPOSITION:

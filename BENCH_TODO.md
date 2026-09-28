@@ -124,6 +124,30 @@ overshoot, add KI last to kill steady-state drift, then read the settled integra
       drifting for the first second while KI winds up from zero.
 - [ ] Blocked on the flange reprint per §0 before the ruler runs are meaningful.
 
+## 2g. Top/bottom baseplate ToF - lying-weight reject (draft code in, hardware not fitted)
+New 5th ToF (`TOF_TOP`, proposed CON31/XSHUT4, VL53L0X, addr 0x38) pairs with the existing notch
+ToF (`TOF_UPRIGHT`) as "bottom": bottom sees something + top doesn't (bench-confirmed blind to a
+weight on its side) = reject before creeping it in. Replaces the old inductive-gated,
+settle-timer back-away check, which was rejecting real upright weights too fast with no top
+sensor to confirm against. Code (`navigation.cpp` `lyingWeightConfirmed()`, `config.h`
+`BOTTOM_PRESENT_MM`/`TOP_PRESENT_MM`/`LYING_CONFIRM_MS`) is drafted but **not tested on any
+hardware** - the top sensor isn't wired yet (in progress 28/9).
+- [ ] Wire CON31 to the new VL53L0X, run `wirefind` to confirm it answers on XSHUT4 and pick up
+      an address - check it lands where `TOF_ADDRESS_START + 4` (0x38) expects.
+- [ ] Confirm mounting height above the baseplate matches what's needed to stay blind to a lying
+      weight while still seeing an upright one - this was bench-tested on the bench rig, not yet
+      on the actual mounted sensor.
+- [ ] **Bench-characterise both thresholds** the same way `FUNNEL_PRESENT_MM` was: log raw mm for
+      steel upright, plastic upright, a lying weight, and empty, for BOTH `tofUpright` and
+      `tofTop`. Set `BOTTOM_PRESENT_MM`/`TOP_PRESENT_MM` from real data - both are placeholders
+      right now (160mm / 80mm).
+- [ ] Confirm `LYING_CONFIRM_MS` (100ms) doesn't false-reject a real weight still sliding into
+      place, the same failure mode the old check had - watch for this specifically on the first
+      full-round test with the new sensor wired in.
+- [ ] Flash `nav`, robot on blocks: place a lying weight in the notch mid-round and confirm REJECT
+      fires quickly (before CREEP would have timed out); place a real upright weight and confirm
+      it does NOT reject.
+
 ## 2d. Third weight carried on the magnet (held at rest, not dropped)
 - [x] Magnet coils **do get hot** in extended use (partner, from earlier testing), so a full-power
       hold for ~100 s isn't safe. Plan: full power to grab, then a **reduced PWM holding level**.

@@ -5,11 +5,13 @@
 #include <VL53L1X.h>
 
 // ============================================================================
-//  tof.cpp  -  4x ToF on the SX1509 XSHUT chain.
+//  tof.cpp  -  5x ToF on the SX1509 XSHUT chain.
 //
 //        [BL]  notch  [BR]        bottom pair, VL53L0X - weight detection
-//           [UPRIGHT]             across the notch - funnel presence
+//           [UPRIGHT]             across the notch - lying-weight "bottom"
 //             [REAR]              VL53L1X - reversing clearance
+//             [TOP]               VL53L0X - lying-weight "top" (proposed,
+//                                  not yet fitted - see config.h TOF_TOP)
 //
 //  Init: all XSHUT low, raise one at a time, wait TOF_BOOT_MS, init,
 //  re-address from TOF_ADDRESS_START (0x34) in index order, start continuous.
@@ -55,6 +57,7 @@ uint16_t &tofBL      = tofMM[TOF_BL];
 uint16_t &tofBR      = tofMM[TOF_BR];
 uint16_t &tofUpright = tofMM[TOF_UPRIGHT];
 uint16_t &tofRear    = tofMM[TOF_REAR];
+uint16_t &tofTop     = tofMM[TOF_TOP];
 
 static uint8_t xshutMask = 0;
 
