@@ -9,6 +9,7 @@
 #include "round.h"
 #include "funnel_sensor.h"   // inductiveMetalNow()
 #include "imu.h"
+#include "odometry.h"        // odomStalled() for the APPROACH progress check
 
 // ============================================================================
 //  navigation.cpp  -  built only by [env:nav] (see platformio.ini).
@@ -95,9 +96,27 @@ static void setMode(int m) { mode = m; modeStart = millis(); }
 
 static float holdTarget = 0;         // heading FORWARD is holding (imu.h: + = right)
 
+// After giving up on a weight (grab missed MAX_PICKUP_TRIES times, or the
+// crane timed out) the trigger is locked out until the notch has read CLEAR
+// for METAL_REARM_CLEAR_MS - otherwise a weight that stays in the notch
+// (jammed, can't be gripped) restarts the pickup forever. Seen on blocks 28/9:
+// gave up, back to FORWARD, same weight -> 3rd pickup immediately.
+static unsigned long pickupCycleStart = 0;   // this crane cycle's start
+static unsigned long metalLeftAt = 0;        // first moment the notch read clear in it (0 = not yet)
+static bool metalLockout = false;
+static unsigned long metalClearSince = 0;
+
 // inductive reads metal continuously for INDUCTIVE_CONFIRM_MS
 static bool metalConfirmed()
 {
+  if (metalLockout)
+  {
+    if (inductiveMetalNow()) { metalClearSince = 0; return false; }
+    if (metalClearSince == 0) metalClearSince = millis();
+    if (millis() - metalClearSince < METAL_REARM_CLEAR_MS) return false;
+    metalLockout = false;
+    Serial.println(">>> pickup trigger re-armed (notch clear)");
+  }
   if (!inductiveMetalNow()) { metalSince = 0; return false; }
   if (metalSince == 0) metalSince = millis();
   return millis() - metalSince >= INDUCTIVE_CONFIRM_MS;
@@ -122,10 +141,18 @@ const char* modeName()
   }
 }
 
+// Corners: a wall on one side, turn away, the other wall appears -> the old
+// code turned straight back (tall-box test 28/9: TURN_L -> TURN_R). Within
+// FLIP_WINDOW_MS of the last turn, an opposite request is overridden: KEEP
+// turning the way we were, so the robot rotates out of the corner in one
+// direction. The second such flip escalates to ESCAPE (reverse + spin).
 static void requestTurn(int dir)
 {
   if (lastTurn != 0 && dir != lastTurn && (millis() - lastTurnEnd) < FLIP_WINDOW_MS)
+  {
     flipCount++;
+    dir = lastTurn;               // commit to the original direction
+  }
   else
     flipCount = 0;
 
@@ -156,6 +183,23 @@ static bool rightOpen()     { return x8Fresh() && isOpen(x8RightMM()); }
 
 // spin toward whichever half has more room
 static int roomierSide() { return room(x8RightMM()) >= room(x8LeftMM()) ? +1 : -1; }
+static inline bool clearForScan(uint16_t mm) { return mm == 0 || mm > SCAN_CLEAR_MM; }
+
+// APPROACH progress check (see config.h APPROACH_PROGRESS_MS)
+static uint16_t approachRefDist = 0;
+static unsigned long approachRefAt = 0;
+static int approachGiveUps = 0;
+int approachGiveUpCount() { return approachGiveUps; }
+
+static void abandonApproach(const char *why)
+{
+  approachGiveUps++;
+  Serial.print(">>> APPROACH abandoned #"); Serial.print(approachGiveUps);
+  Serial.print(" - "); Serial.println(why);
+  suppressTargetFor(APPROACH_GIVEUP_SUPPRESS_MS);
+  lastFindOrEvent = millis();
+  setMode(MODE_FORWARD);
+}
 
 static int cautionVeer()
 {
@@ -174,6 +218,7 @@ static void startApproach()
   lastFindOrEvent = millis();
   approachErrPrev = 0;
   lastWeightDist = 0;
+  approachRefDist = 0;
   setMode(MODE_APPROACH);
 }
 
@@ -246,9 +291,11 @@ void navigationUpdate()
 #if USE_SCAN
       // IMU HOOK: with a heading reference, this could scan a bounded sweep
       // (e.g. +/-60 degrees) instead of a blind, un-measured spin.
-      else if (wantWeights && x8Fresh() && millis() - lastFindOrEvent > SCAN_TRIGGER_MS)
+      // only with clear space on both sides, and spin toward the roomier one
+      else if (wantWeights && x8Fresh() && millis() - lastFindOrEvent > SCAN_TRIGGER_MS &&
+               clearForScan(x8LeftMM()) && clearForScan(x8RightMM()))
       {
-        scanDir = -scanDir;
+        scanDir = roomierSide();
         setMode(MODE_SCAN);
       }
 #endif
@@ -262,8 +309,10 @@ void navigationUpdate()
         escapeSpinMs  = ESCAPE_SPIN_MS + 800;
         setMode(MODE_ESCAPE);
       }
-      // stale 8x8: can't see whether it's open, so end on time
-      else if (held > MIN_TURN_MS && (leftOpen() || !x8Fresh()))
+      // stale 8x8: can't see whether it's open, so end on time. Otherwise end
+      // only when the blocked side is open AND the other side isn't close
+      // (else FORWARD would immediately start the opposite turn)
+      else if (held > MIN_TURN_MS && ((leftOpen() && !obstacleRight()) || !x8Fresh()))
       {
         lastTurnEnd = millis();
         setMode(MODE_FORWARD);
@@ -277,7 +326,7 @@ void navigationUpdate()
         escapeSpinMs  = ESCAPE_SPIN_MS + 800;
         setMode(MODE_ESCAPE);
       }
-      else if (held > MIN_TURN_MS && (rightOpen() || !x8Fresh()))
+      else if (held > MIN_TURN_MS && ((rightOpen() && !obstacleLeft()) || !x8Fresh()))
       {
         lastTurnEnd = millis();
         setMode(MODE_FORWARD);
@@ -310,10 +359,25 @@ void navigationUpdate()
 
       if (metalConfirmed()) { pickupTries = 0; startPickup(); break; }
 
+      if (odomStalled() && held > APPROACH_PROGRESS_MS) { abandonApproach("tracks stalled"); break; }
+
       if (weightFound)
       {
         lastWeightDist = weightDistMM;
         lastWeightSide = weightSide;
+
+        // progress: a real weight gets closer; a wall seen at an angle doesn't
+        if (approachRefDist == 0) { approachRefDist = weightDistMM; approachRefAt = millis(); }
+        else if (millis() - approachRefAt >= APPROACH_PROGRESS_MS)
+        {
+          if ((int)approachRefDist - (int)weightDistMM < APPROACH_MIN_CLOSE_MM)
+          {
+            abandonApproach("candidate not getting closer (wall at an angle / blocked)");
+            break;
+          }
+          approachRefDist = weightDistMM;
+          approachRefAt = millis();
+        }
       }
       else if (lastWeightDist > 0 && lastWeightDist < CREEP_START_MM)
       {
@@ -338,7 +402,16 @@ void navigationUpdate()
         collection_start();      // partner's crane/magnet FSM
         pickupStarted = true;
         pickupTries++;
+        pickupCycleStart = millis();
+        metalLeftAt = 0;
       }
+      // DATA ONLY (no behaviour change yet): when did the metal first leave
+      // the notch? Real lifts 28/9 held metal steadily on the way down and
+      // only lost it ~1.2s in (the lift). A weight pushed out by the arm would
+      // leave EARLIER. Floor logs decide the cut-off / whether option 3 (a
+      // crane "lift started" signal) is needed.
+      if (pickupStarted && metalLeftAt == 0 && !inductiveMetalNow())
+        metalLeftAt = millis();
       else if (!collection_busy() || held > PICKUP_TIMEOUT_MS)
       {
         pickupAttempts++;
@@ -346,9 +419,12 @@ void navigationUpdate()
         bool stillThere = inductiveMetalNow();   // metal still in the notch = the grab missed
 
         Serial.print(">>> PICKUP ATTEMPT #"); Serial.print(pickupAttempts);
-        if (timedOut)        Serial.println(" - TIMED OUT waiting for crane");
-        else if (stillThere) Serial.println(" - MISSED (metal still in the notch)");
-        else                 Serial.println(" - OK (weight gone from the notch)");
+        if (timedOut)        Serial.print(" - TIMED OUT waiting for crane");
+        else if (stillThere) Serial.print(" - MISSED (metal still in the notch)");
+        else                 Serial.print(" - OK (weight gone from the notch)");
+        Serial.print(", metal left at ");
+        if (metalLeftAt) { Serial.print((metalLeftAt - pickupCycleStart) / 1000.0f, 2); Serial.println(" s"); }
+        else               Serial.println("never");
 
         if (!timedOut && stillThere && pickupTries < MAX_PICKUP_TRIES)
         {
@@ -357,6 +433,12 @@ void navigationUpdate()
           break;
         }
         if (!timedOut && !stillThere) noteCollected();
+        else
+        {
+          metalLockout = true;            // leave this weight behind before triggering again
+          metalClearSince = 0;
+          Serial.println(">>> giving up on this weight - trigger locked until the notch is clear");
+        }
 
         suppressTargetFor(TARGET_SUPPRESS_MS);
         lastFindOrEvent = millis();

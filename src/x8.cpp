@@ -101,9 +101,28 @@ static uint16_t bandMin(uint8_t colLo, uint8_t colHi)
   return best;
 }
 
-uint16_t x8FrontMM() { return bandMin(0, 7); }
-uint16_t x8LeftMM()  { return bandMin(0, 3); }
-uint16_t x8RightMM() { return bandMin(4, 7); }
+// The SEN0628 reports 0 both for "nothing in range" AND for "too close to
+// measure". Tall-box test 28/9: box at 30mm, right half read 33, 0, 53 - a
+// 0 there means BLOCKED, not open. So a half that was reading close
+// (< X8_CLOSE_LATCH_MM) and suddenly reads 0 keeps its last close value for
+// X8_ZERO_HOLD_MS, until a real reading arrives.
+struct HalfLatch { uint16_t last = 0; unsigned long at = 0; };
+static HalfLatch latchL, latchR;
+
+static uint16_t latched(uint16_t now, HalfLatch &h)
+{
+  if (now > 0) { h.last = now; h.at = millis(); return now; }
+  if (h.last > 0 && h.last < X8_CLOSE_LATCH_MM && millis() - h.at < X8_ZERO_HOLD_MS) return h.last;
+  return 0;
+}
+
+uint16_t x8LeftMM()  { return latched(bandMin(0, 3), latchL); }
+uint16_t x8RightMM() { return latched(bandMin(4, 7), latchR); }
+uint16_t x8FrontMM()
+{
+  uint16_t l = x8LeftMM(), r = x8RightMM();
+  return nearest(l, r);
+}
 
 float x8BearingDeg(uint16_t *distOut)
 {

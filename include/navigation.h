@@ -11,5 +11,6 @@ void navigationInit();
 void navigationUpdate();
 const char* modeName();
 int rejectedCount();      // dummies/non-metal backed away from (telemetry)
+int approachGiveUpCount(); // approaches dropped for not closing in / stalled (telemetry)
 
 #endif /* __NAVIGATION_H */

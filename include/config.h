@@ -145,6 +145,11 @@ const uint16_t X8_WALL_SPREAD_MM = 150;   // flat across >=7 columns = wall
 // getAllData() blocks ~20-40ms per call (the library polls with delay(17)),
 // so don't read faster than needed. setRangingMode() blocks 5s at init.
 const unsigned long X8_READ_MS  = 100;
+// "0" is ambiguous (nothing in range OR too close). A half that read closer
+// than X8_CLOSE_LATCH_MM and then 0 is treated as still that close for
+// X8_ZERO_HOLD_MS (x8.cpp latched()). Tall-box test 28/9: 33 -> 0 -> 53 mm.
+const uint16_t X8_CLOSE_LATCH_MM = 150;
+const unsigned long X8_ZERO_HOLD_MS = 600;
 const int X8_MODE_RETRIES = 3;
 // No fresh frame for this long -> treat the front as unknown (crawl).
 const unsigned long X8_STALE_MS = 400;
@@ -366,9 +371,26 @@ const unsigned long HEADING_HOLD_SETTLE_MS = 300;
 // KNOWN LIMITATION: a weight within DIFF_CLEAR_MARGIN_MM of a wall reads as
 // wall, so weights against walls are ignored.
 const int WEIGHT_MIN_MM        = 60;
-const int WEIGHT_MAX_MM        = 700;
+// Tall-box test 28/9: the false candidates were at 510-675mm - the bottom
+// ToFs point outward, past the 8x8's field of view, so a side wall at an
+// angle reads as "low + nothing above it" = weight. Real weights were seen
+// from ~140mm. The robot cruises closer anyway, so a shorter range costs little.
+const int WEIGHT_MAX_MM        = 500;   // was 700
 const int DIFF_CLEAR_MARGIN_MM = 250;
-const int WEIGHT_STICK_MS      = 120;
+const int WEIGHT_STICK_MS      = 250;   // was 120 - single-frame flickers started approaches
+
+// APPROACH must make progress: the candidate has to get at least
+// APPROACH_MIN_CLOSE_MM closer every APPROACH_PROGRESS_MS, and the tracks
+// mustn't be stalled - otherwise drop it and suppress it. Catches walls seen
+// at an angle (their distance grew 411 -> 713mm while "approaching") and a
+// robot that's stuck. TODO(verify) on the floor at the approach speed.
+const unsigned long APPROACH_PROGRESS_MS = 1000;
+const int APPROACH_MIN_CLOSE_MM          = 30;
+const unsigned long APPROACH_GIVEUP_SUPPRESS_MS = 3000;
+
+// SCAN only starts with this much clear space on BOTH halves of the 8x8
+// (28/9 it started with a wall 30cm away and spun toward it)
+const int SCAN_CLEAR_MM = 600;
 
 // ---------------------------------------------------------------------------
 // PICKUP TRIGGER (inductive) / CREEP / REJECT  -  see navigation.cpp
@@ -382,7 +404,10 @@ const unsigned long INDUCTIVE_CONFIRM_MS = 60;    // metal must read steadily th
 const int  CREEP_START_MM   = 200;   // candidate lost closer than this -> creep, not give up
 const int  CREEP_SPEED_PCT  = 30;
 const unsigned long CREEP_MAX_MS = 1000;   // no metal by then -> REJECT
-const int  MAX_PICKUP_TRIES = 2;     // metal still in the notch after a cycle = missed grab -> retry
+const int  MAX_PICKUP_TRIES = 2;
+// after giving up on a weight, the inductive trigger stays locked until the
+// notch has read clear this long (else a stuck weight is retried forever)
+const unsigned long METAL_REARM_CLEAR_MS = 500;     // metal still in the notch after a cycle = missed grab -> retry
 const int  REJECT_REVERSE_PCT = 40;
 const unsigned long REJECT_REVERSE_MS  = 500;    // aim ~10cm clear of the notch
 const unsigned long REJECT_SUPPRESS_MS = 4000;   // ignore that spot for this long

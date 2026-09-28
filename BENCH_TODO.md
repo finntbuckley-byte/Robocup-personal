@@ -82,10 +82,10 @@ Work top to bottom. 🤖 = Claude can do it from the laptop once the Teensy is p
 
 ## 2c. New pickup logic (inductive trigger, CREEP / REJECT): bench tests on blocks
 Flash `nav`, robot on blocks, say go before pressing GO. 🤖 logs each one.
-- [ ] **Pickup chain:** drop a steel weight into the notch mid-round → PICKUP → crane → "OK" →
+- [x] (28/9 blocks: OK, onb +1, REPOSITION) **Pickup chain:** drop a steel weight into the notch mid-round → PICKUP → crane → "OK" →
       `onb` +1 → turns away. Repeat to 3 on board → it stops collecting.
-- [ ] **Missed grab:** hold the weight down so the magnets can't lift it → retries once, then gives up.
-- [ ] **CREEP → REJECT:** hold a weight ~14 cm ahead of the bottom-left ToF, then pull it away →
+- [x] (28/9 blocks, spacer on the weight: MISS, retry, MISS, give up; + new lockout stops endless retries on a weight left in the notch) **Missed grab:** hold the weight down so the magnets can't lift it → retries once, then gives up.
+- [x] (28/9 blocks: CREEP -> REJECT reverse + pivot seen twice; rear-guard hand check still to do) **CREEP → REJECT:** hold a weight ~14 cm ahead of the bottom-left ToF, then pull it away →
       creep, no metal, reverse + pivot. Hand behind the robot during the reverse → rear guard stops it.
 - [ ] **Full 2-min round, hands off:** stops itself at ~118.5 s, no hang, no reset (`ms` never jumps
       back to 0). With a pickup in it, this also checks crane + both tracks together don't brown out.
@@ -108,13 +108,13 @@ Flash `nav`, robot on blocks, say go before pressing GO. 🤖 logs each one.
   - [x] Tall-box run 28/9 (`docs/testdata/2026-09-28_nav_tallbox_test2.log`, 20 s, IMU working):
         avoided the box (TURN_R at 24/27 cm, closest ~17 cm, no contact), hold steered against
         the right drift, then held ~89 deg after the turn. Got out of a corner but slowly.
-  - [ ] **Corner handling:** TURN_L went straight into TURN_R (flip-flop), then a 2.2 s spin with
+  - [~] *(coded 28/9, test on the floor)* **Corner handling:** TURN_L went straight into TURN_R (flip-flop), then a 2.2 s spin with
         the 8x8 at 3-8 cm. Commit to one turn direction in corners / go to ESCAPE sooner.
-  - [ ] **False weight detections near walls/corners:** several APPROACH entries with no weight
+  - [~] *(coded 28/9, test on the floor)* **False weight detections near walls/corners:** several APPROACH entries with no weight
         (bottom ToFs see the wall base at an angle, 8x8 band doesn't match on that side). Tune
         weight_detect (margin / require the candidate to persist / ignore when a wall is close).
-  - [ ] **SCAN started with a wall 30 cm away** (6.1 s): only allow SCAN with clear space around.
-  - [ ] *(low priority, safety net)* **APPROACH "no progress" exit.** APPROACH only ends when the
+  - [~] *(coded 28/9, test on the floor)* **SCAN started with a wall 30 cm away** (6.1 s): only allow SCAN with clear space around.
+  - [~] *(coded 28/9 - turned out to be the main false-weight fix, test on the floor)* **APPROACH "no progress" exit.** APPROACH only ends when the
         weight gets closer / disappears or a wall appears on the 8x8. If the robot can't close in
         (track stuck on a bump or ramp edge, wedged on something below the 8x8 rows, pushed by the
         other robot, weight tight against a wall base) it would stay in APPROACH for the rest of the
@@ -122,6 +122,17 @@ Flash `nav`, robot on blocks, say go before pressing GO. 🤖 logs each one.
         `odomStalled()`. (Not a bug seen so far: staying in APPROACH on blocks 28/9 was expected -
         the robot can't move there, and the detection was a real weight on its right.) Check on
         the floor whether it ever triggers.
+- [ ] **Pickup push-out check (arena):** every PICKUP event line now says `metal left at X.XX s`
+      (data only). Real lifts on blocks 28/9 lost the metal ~1.2 s in (the lift). A weight pushed
+      out by the arm would leave earlier and still be counted as collected (false `onb` -> the
+      3-target cap stops collecting early). From the arena logs: if push-outs happen, add the
+      crane "lift started" check (option 3: small getter in collection.cpp, partner's OK) and
+      only count a pickup if metal was still there when the lift began.
+- [ ] **Floor test of the 28/9 behaviour fixes** (re-run the tall-box / corner setup, log it):
+      8x8 "0 = too close" latch (`X8_CLOSE_LATCH_MM`/`X8_ZERO_HOLD_MS`), corner turn-commit + turns only
+      end when the other side isn't close, SCAN only with >60 cm clear both sides (`SCAN_CLEAR_MM`),
+      APPROACH progress check (>=30 mm closer per 1 s, not stalled; `abd` telemetry column counts
+      give-ups), weight candidates 250 ms / <=500 mm. Tune those values from the log.
 - [ ] **Raise `DRIVE_SCALE_PCT` back to 100** (`config.h`, currently 50 = half the usable pulse
       range, a safety limiter for first floor tests). Once avoidance behaves, step 50 → 75 → 100 and
       retest avoidance at each step: stopping distance grows with speed, so the 8×8 thresholds may
@@ -132,7 +143,9 @@ Flash `nav`, robot on blocks, say go before pressing GO. 🤖 logs each one.
       don't get pushed clear, or keep getting re-found: longer reverse + bigger turn first, then
       the under-plate flinger.
 - [ ] Creep through the blind gap: tune `CREEP_SPEED_PCT` / `CREEP_MAX_MS` so a real weight reliably
-      reaches the inductive sensor before REJECT fires.
+      reaches the inductive sensor before REJECT fires. (Blocks 28/9: a steel weight a few mm outside
+      inductive range, ~13-17 cm ahead on the bottom ToFs, was REJECTed as "no metal" - on blocks the
+      creep can't push it in. Check on the floor that real weights never get rejected.)
 - [ ] Approach + pickup on a single weight.
 - [ ] Tune `SIDE_NEAR_MM` (side IR, currently 150) against a red wall.
 - [ ] Paste the telemetry into a spreadsheet for report data: sorting/collection accuracy, speed,
