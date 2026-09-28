@@ -17,6 +17,14 @@
 //  XSHUT is driven by writing the SX1509's bank-A registers directly (same as
 //  wire_finder.cpp), so the SparkFun SX1509 library isn't needed.
 //
+//  Stale + recovery (2026-09-28: the notch L1X kept dropping off the bus on
+//  a bad connection at its end and rebooting to 0x29 - its last reading then
+//  stayed frozen in tofMM): a sensor with no new data for TOF_STALE_MS reads
+//  0 and tofOk() goes false; every TOF_RECOVER_INTERVAL_MS (backing off to
+//  TOF_RECOVER_BACKOFF_MS after 3 failures in a row) its XSHUT is pulsed and
+//  it's set up again - the same reset that brought it back after a re-flash.
+//  A recovery attempt blocks ~60-150 ms, hence the rate limit.
+//
 //  Reads never block:
 //    L1X - gated on dataReady(); invalid range status reads as 0.
 //    L0X - gated on the result-interrupt register, so
@@ -34,6 +42,14 @@ static bool tofSensorOk[TOF_COUNT] = {false};
 static uint16_t rawMM[TOF_COUNT] = {0};
 static uint8_t  rawStatus[TOF_COUNT] = {0};     // L1X range_status, 0 = valid
 static unsigned long lastDataMs[TOF_COUNT] = {0};
+
+// stale detection + recovery
+static bool tofFresh[TOF_COUNT] = {false};
+static unsigned long setupAtMs[TOF_COUNT] = {0};
+static unsigned long lastRecoverMs[TOF_COUNT] = {0};
+static uint8_t recoverFailsInRow[TOF_COUNT] = {0};
+static int recoverCount = 0;
+static bool recoveryPending[TOF_COUNT] = {false};   // re-initialised, waiting for its first reading
 
 uint16_t &tofBL      = tofMM[TOF_BL];
 uint16_t &tofBR      = tofMM[TOF_BR];
@@ -68,6 +84,90 @@ static void xshutWrite(uint8_t mask)
   sxWrite(SX_REG_DATA_A, xshutMask);
 }
 
+// set up sensor i, which must be the only one answering on 0x29 (its XSHUT
+// just raised). Fresh driver object = default address. Used at boot and by
+// the recovery.
+static bool setupSensor(int i)
+{
+  bool ok = false;
+  if (TOF_TYPE[i] == 0)                              // VL53L0X
+  {
+    l0x[i] = VL53L0X();
+    l0x[i].setBus(&TOF_WIRE);
+    l0x[i].setTimeout(100);
+    ok = l0x[i].init();
+    if (ok)
+    {
+      l0x[i].setAddress(TOF_ADDRESS_START + i);
+      l0x[i].startContinuous(TOF_PERIOD_MS);
+    }
+  }
+  else                                               // VL53L1X
+  {
+    l1x[i] = VL53L1X();
+    l1x[i].setBus(&TOF_WIRE);
+    l1x[i].setTimeout(100);
+    ok = l1x[i].init();
+    if (ok)
+    {
+      l1x[i].setAddress(TOF_ADDRESS_START + i);
+      l1x[i].setDistanceMode(TOF_SHORT_MODE[i] ? VL53L1X::Short : VL53L1X::Long);
+      l1x[i].setMeasurementTimingBudget(TOF_L1X_BUDGET_US);
+      l1x[i].startContinuous(TOF_PERIOD_MS);
+    }
+  }
+  setupAtMs[i] = millis();
+  lastDataMs[i] = 0;
+  tofFresh[i] = ok;
+  return ok;
+}
+
+// pulse sensor i's XSHUT (clean reset, whatever state it's in), set it up again.
+// 0x29 must be free: every OTHER stale sensor is held in shutdown first (one
+// that rebooted by itself would be squatting on 0x29), and a sensor whose
+// recovery fails is left in shutdown for the same reason. (First version, 28/9:
+// a failed L0X stayed up at 0x29, so the other L0X's recovery collided with it
+// and both failed forever.)
+static void recoverSensor(int i)
+{
+  lastRecoverMs[i] = millis();
+  uint8_t mask = xshutMask;
+  for (int j = 0; j < TOF_COUNT; j++)
+    if (j != i && tofSensorOk[j] && !tofFresh[j]) mask &= ~(1 << XSHUT_TOF[j]);
+  mask &= ~(1 << XSHUT_TOF[i]);
+  xshutWrite(mask);
+  delay(TOF_RESET_LOW_MS);
+  xshutWrite(mask | (1 << XSHUT_TOF[i]));
+  delay(TOF_BOOT_MS);
+  bool ok = setupSensor(i);
+  // a recovery only COUNTS once real data arrives (markData) - a sensor with
+  // a bad connection re-inits fine and then dies the moment it ranges, and
+  // must still back off (first version 28/9 retried every 2s forever)
+  if (ok) { recoveryPending[i] = true; tofFresh[i] = false; }
+  else
+  {
+    xshutWrite(xshutMask & ~(1 << XSHUT_TOF[i]));   // keep it off 0x29 until its next try
+    if (recoverFailsInRow[i] < 255) recoverFailsInRow[i]++;
+  }
+  Serial.print(">>> ToF "); Serial.print(i);
+  Serial.println(ok ? " dropped out - re-initialised, waiting for data"
+                    : " dropped out - recovery FAILED, will retry");
+}
+
+// fresh data from sensor i: completes a pending recovery
+static void markData(int i)
+{
+  lastDataMs[i] = millis();
+  tofFresh[i] = true;
+  if (recoveryPending[i])
+  {
+    recoveryPending[i] = false;
+    recoverFailsInRow[i] = 0;
+    recoverCount++;
+    Serial.print(">>> ToF "); Serial.print(i); Serial.println(" RECOVERED (data flowing again)");
+  }
+}
+
 void tofInit()
 {
   // data low first, then make bank A outputs - no glitch high on any XSHUT
@@ -92,32 +192,7 @@ void tofInit()
     xshutWrite(xshutMask | (1 << XSHUT_TOF[i]));
     delay(TOF_BOOT_MS);
 
-    bool ok = false;
-    if (TOF_TYPE[i] == 0)                            // VL53L0X
-    {
-      l0x[i].setBus(&TOF_WIRE);
-      l0x[i].setTimeout(100);
-      ok = l0x[i].init();
-      if (ok)
-      {
-        l0x[i].setAddress(TOF_ADDRESS_START + i);
-        l0x[i].startContinuous(TOF_PERIOD_MS);
-      }
-    }
-    else                                             // VL53L1X
-    {
-      l1x[i].setBus(&TOF_WIRE);
-      l1x[i].setTimeout(100);
-      ok = l1x[i].init();
-      if (ok)
-      {
-        l1x[i].setAddress(TOF_ADDRESS_START + i);
-        l1x[i].setDistanceMode(TOF_SHORT_MODE[i] ? VL53L1X::Short : VL53L1X::Long);
-        l1x[i].setMeasurementTimingBudget(TOF_L1X_BUDGET_US);
-        l1x[i].startContinuous(TOF_PERIOD_MS);
-      }
-    }
-
+    bool ok = setupSensor(i);
     tofSensorOk[i] = ok;
     Serial.print("ToF "); Serial.print(i);
     Serial.print(" (XSHUT"); Serial.print(XSHUT_TOF[i]);
@@ -129,15 +204,42 @@ void tofInit()
 
 void tofUpdate()
 {
+  unsigned long now = millis();
+  // the stale clock starts at the first update, not at setup: boot blocks
+  // (the 8x8's 5s mode set) must not count as "no data" (first version 28/9
+  // marked every sensor stale straight after boot)
+  static unsigned long firstUpdateMs = 0;
+  if (firstUpdateMs == 0) firstUpdateMs = now;
   for (int i = 0; i < TOF_COUNT; i++)
   {
-    if (!tofSensorOk[i]) continue;
+    if (!tofSensorOk[i]) continue;   // never came up at boot - not ours to chase
+
+    // stale: no new data for TOF_STALE_MS since the last reading (or since setup)
+    unsigned long since = lastDataMs[i] ? lastDataMs[i]
+                                        : (setupAtMs[i] > firstUpdateMs ? setupAtMs[i] : firstUpdateMs);
+    if (now - since > TOF_STALE_MS)
+    {
+      if (recoveryPending[i])
+      {
+        recoveryPending[i] = false;
+        if (recoverFailsInRow[i] < 255) recoverFailsInRow[i]++;
+      }
+      if (tofFresh[i])
+      {
+        tofFresh[i] = false;
+        tofMM[i] = 0;                 // never act on a frozen old value
+        Serial.print(">>> ToF "); Serial.print(i); Serial.println(" STALE - no data, trying recovery");
+      }
+      unsigned long wait = recoverFailsInRow[i] >= 3 ? TOF_RECOVER_BACKOFF_MS : TOF_RECOVER_INTERVAL_MS;
+      if (now - lastRecoverMs[i] >= wait) recoverSensor(i);
+      continue;
+    }
 
     if (TOF_TYPE[i] == 1)
     {
       if (!l1x[i].dataReady()) continue;
       uint16_t mm = l1x[i].read(false);
-      rawMM[i] = mm; rawStatus[i] = l1x[i].ranging_data.range_status; lastDataMs[i] = millis();
+      rawMM[i] = mm; rawStatus[i] = l1x[i].ranging_data.range_status; markData(i);
       // seen 2026-09-25: "valid" status with 64351mm - reject anything past range
       bool valid = l1x[i].ranging_data.range_status == VL53L1X::RangeValid && mm <= TOF_MAX_VALID_MM;
       tofMM[i] = valid ? mm : 0;
@@ -146,7 +248,7 @@ void tofUpdate()
     {
       if ((l0x[i].readReg(L0X_REG_INTERRUPT_STATUS) & 0x07) == 0) continue;
       uint16_t mm = l0x[i].readRangeContinuousMillimeters();
-      rawMM[i] = mm; rawStatus[i] = 0; lastDataMs[i] = millis();
+      rawMM[i] = mm; rawStatus[i] = 0; markData(i);
       tofMM[i] = (mm >= L0X_NO_TARGET_MM) ? 0 : mm;
     }
   }
@@ -154,8 +256,10 @@ void tofUpdate()
 
 bool tofOk(int index)
 {
-  return index >= 0 && index < TOF_COUNT && tofSensorOk[index];
+  return index >= 0 && index < TOF_COUNT && tofSensorOk[index] && tofFresh[index];
 }
+
+int tofRecoverCount() { return recoverCount; }
 
 bool rearBlocked() { return tofRear > 0 && tofRear < REAR_STOP_MM; }
 

@@ -23,6 +23,14 @@ Work top to bottom. 🤖 = Claude can do it from the laptop once the Teensy is p
 - [x] **First wall test (28/9, log `docs/testdata/2026-09-28_nav_wall_test.log`):** drove at a
       low box from ~68 cm; 8x8 closure matched the encoders (418 vs 435 mm); at ~25 cm it turned
       LEFT towards the open side (correct direction - motor fix confirmed); GO-stop worked.
+- [x] (FIXED 28/9 with a new wire: wiggle test 113/113 OK, both ends flexed) **Notch ToF (CON27) bad connection at the SENSOR END (28/9 wiggle test):** 36/36 OK hands-off,
+      dropped the moment the sensor end was flexed; also failed on its own after test 1 (vibration).
+      New wire being fitted -> re-run the wiggle test (both ends). If a joint on the module header is
+      cracked, reflow it. Add strain relief near the notch.
+- [x] **ToF safety net (28/9):** a ToF with no data for 500 ms reads 0 (no frozen old value) and
+      `tofOk()` goes false; it's XSHUT-reset + re-initialised (2 s retries, 10 s after 3 failures).
+      Other stale sensors are held off 0x29 during a recovery. Tested with the bad cable: healthy
+      sensors unaffected, the dropped one came back in 0.3 s. `tofRec` telemetry column.
 - [x] **IMU heading frozen in nav (28/9): findings.**
   - The `i` I2C scan itself rebooted the BNO055 (3/3): its empty address-only write to 0x28.
     Fixed: the scan skips reserved addresses and checks the BNO055 by chip-ID read.
@@ -71,7 +79,7 @@ Work top to bottom. 🤖 = Claude can do it from the laptop once the Teensy is p
       (done 25/9: pickup 118° @ 45°/s, drop 40° @ 60°/s, rest 70° @ 100°/s, full cycle ≈5 s).
 - [x] Weightless position check + full cycle with a real weight: grips and drops cleanly.
 - [x] Watch for servo heat / buzzing after repeated pickups (done 25/9: endurance loop on a plastic dummy, no heat).
-- [ ] Add the 514 servo isolator board if the arm takes knocks (a knock can reset the CPU).
+- [x] ~~514 servo isolator board~~ **not available** (28/9). Avoid hard knocks to the crane arm; if a log ever shows an unexplained reset right after the arm is hit, that's the likely cause (back-EMF).
 
 ## 2b. Dummy rejection (inductive sensor at the notch, 40 mm up, front-on)
 - [ ] **Needs an insert-dummy (plastic with a steel top). None found yet.** Upright in the notch
@@ -85,9 +93,9 @@ Flash `nav`, robot on blocks, say go before pressing GO. 🤖 logs each one.
 - [x] (28/9 blocks: OK, onb +1, REPOSITION) **Pickup chain:** drop a steel weight into the notch mid-round → PICKUP → crane → "OK" →
       `onb` +1 → turns away. Repeat to 3 on board → it stops collecting.
 - [x] (28/9 blocks, spacer on the weight: MISS, retry, MISS, give up; + new lockout stops endless retries on a weight left in the notch) **Missed grab:** hold the weight down so the magnets can't lift it → retries once, then gives up.
-- [x] (28/9 blocks: CREEP -> REJECT reverse + pivot seen twice; rear-guard hand check still to do) **CREEP → REJECT:** hold a weight ~14 cm ahead of the bottom-left ToF, then pull it away →
+- [x] (28/9 blocks: CREEP -> REJECT reverse + pivot; rear guard confirmed - hand at ~155 mm held the reverse at 0/0, then the pivot ran) **CREEP → REJECT:** hold a weight ~14 cm ahead of the bottom-left ToF, then pull it away →
       creep, no metal, reverse + pivot. Hand behind the robot during the reverse → rear guard stops it.
-- [ ] **Full 2-min round, hands off:** stops itself at ~118.5 s, no hang, no reset (`ms` never jumps
+- [x] (28/9: stopped itself at 118.5 s, no resets, IMU 0 resets, 8x8 never stale, pickup counted) **Full 2-min round, hands off:** stops itself at ~118.5 s, no hang, no reset (`ms` never jumps
       back to 0). With a pickup in it, this also checks crane + both tracks together don't brown out.
 
 ## 2d. Third weight carried on the magnet (held at rest, not dropped)
@@ -103,7 +111,7 @@ Flash `nav`, robot on blocks, say go before pressing GO. 🤖 logs each one.
       50 → 35 %) to find the lowest that still holds through a shake. Then 2 min at that level:
       feel the coils **and** the crane servo (it holds 1 kg on the arm the whole time).
 
-## 3. On the floor  (waiting on a printed part to improve motion)
+## 3. On the floor  (printed parts installed first)
 - [ ] Obstacle avoidance on its own. `x` kills the motors.
   - [x] Tall-box run 28/9 (`docs/testdata/2026-09-28_nav_tallbox_test2.log`, 20 s, IMU working):
         avoided the box (TURN_R at 24/27 cm, closest ~17 cm, no contact), hold steered against

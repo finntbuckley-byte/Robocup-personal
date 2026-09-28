@@ -20,7 +20,8 @@ extern uint16_t &tofBL, &tofBR, &tofUpright, &tofRear;
 void tofInit();
 void tofUpdate();
 
-bool tofOk(int index);     // sensor initialised and answering
+bool tofOk(int index);     // sensor initialised AND producing fresh data (false while stale/recovering)
+int  tofRecoverCount();    // times a dropped-out ToF was brought back (telemetry)
 bool rearBlocked();
 void tofPrintRaw();        // diagnostics ('u'): raw mm + status + data age + I2C error per sensor
 

@@ -138,7 +138,7 @@ static bool telemetryOn = true;
 
 static void printTelemetryHeader()
 {
-  Serial.println("ms\tround\tmode\tBL\tBR\tUP\tREAR\tX8L\tX8R\tIRL\tIRR\tfun\tind\tW\tpicks\treal\tdummy\tonb\trej\tabd\tdrvL\tdrvR\todo\todoRaw\tslip\tstall\thdg\timuMode\timuRst\tgoD\tgoA");
+  Serial.println("ms\tround\tmode\tBL\tBR\tUP\tREAR\tX8L\tX8R\tIRL\tIRR\tfun\tind\tW\tpicks\treal\tdummy\tonb\trej\tabd\tdrvL\tdrvR\todo\todoRaw\tslip\tstall\thdg\timuMode\timuRst\ttofRec\tgoD\tgoA");
 }
 
 static void printTelemetry()
@@ -184,6 +184,7 @@ static void printTelemetry()
   Serial.print('\t');
   Serial.print("0x"); Serial.print(imuOprMode(), HEX); Serial.print('\t');   // 0x8 = IMUPLUS, 0x0 = rebooted
   Serial.print(imuResetCount());        Serial.print('\t');
+  Serial.print(tofRecoverCount());      Serial.print('\t');
   // raw GO pin, digital + 10-bit analog - bring-up diagnostic
   if (PIN_GO >= 0) { Serial.print(digitalRead(PIN_GO)); Serial.print('\t'); Serial.println(analogRead(PIN_GO)); }
   else             { Serial.println("-\t-"); }

@@ -115,6 +115,17 @@ const unsigned long TOF_PERIOD_MS    = 50;   // continuous-mode inter-measuremen
 const unsigned long TOF_L1X_BUDGET_US = 33000;
 const uint16_t TOF_MAX_VALID_MM = 4000;   // VL53L1X long-mode max; above = garbage
 
+// A ToF with no new data for this long is STALE (reads 0, tofOk() false) and
+// gets an XSHUT reset + re-init (tof.cpp recoverSensor). Sensors range every
+// TOF_PERIOD_MS (50), so 500 = ~10 missed readings. Recovery blocks ~60-150ms,
+// so retries are rate-limited, backing off after 3 failures in a row.
+// (28/9: bad connection at the notch sensor's end - it dropped off the bus
+// and rebooted to 0x29 whenever the cable moved.)
+const unsigned long TOF_STALE_MS            = 500;
+const unsigned long TOF_RESET_LOW_MS        = 10;   // XSHUT held low for a reset (same as boot)
+const unsigned long TOF_RECOVER_INTERVAL_MS = 2000;
+const unsigned long TOF_RECOVER_BACKOFF_MS  = 10000;
+
 // ---------------------------------------------------------------------------
 // SEN0628 8x8 MATRIX ToF  -  front obstacle sensing
 // ---------------------------------------------------------------------------
