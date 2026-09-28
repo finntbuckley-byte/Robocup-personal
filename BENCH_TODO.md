@@ -130,6 +130,12 @@ Flash `nav`, robot on blocks, say go before pressing GO. 🤖 logs each one.
         `odomStalled()`. (Not a bug seen so far: staying in APPROACH on blocks 28/9 was expected -
         the robot can't move there, and the detection was a real weight on its right.) Check on
         the floor whether it ever triggers.
+- [ ] **Ground clearance (28/9):** the front end can't get over the home base's ~10 mm rim yet ->
+      filing one end down. Until then, floor tests start OUTSIDE the base. Once filed, check:
+      over the base rim **both ways** (leaving at the start, re-entering to deliver), a **25 mm speed
+      bump**, and a **100 mm / 30 % ramp** - the arena has all three.
+- [ ] **Test in the actual arena where possible:** black floor/walls change what the bottom ToFs, the
+      8x8 floor rows (r5-r7 set on a lighter floor) and the side IR see. Re-run `g` there first.
 - [ ] **Pickup push-out check (arena):** every PICKUP event line now says `metal left at X.XX s`
       (data only). Real lifts on blocks 28/9 lost the metal ~1.2 s in (the lift). A weight pushed
       out by the arm would leave earlier and still be counted as collected (false `onb` -> the
