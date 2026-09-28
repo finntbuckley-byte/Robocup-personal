@@ -280,16 +280,29 @@ int tofRecoverCount() { return recoverCount; }
 
 bool rearBlocked() { return tofRear > 0 && tofRear < REAR_STOP_MM; }
 
+// matched against the TOF_* index constants (config.h), not a fixed order,
+// so this stays correct if the index assignment ever changes there.
+static const char* tofName(int i)
+{
+  if (i == TOF_BL)      return "BL";
+  if (i == TOF_BR)      return "BR";
+  if (i == TOF_UPRIGHT) return "UPRIGHT";
+  if (i == TOF_REAR)    return "REAR";
+  if (i == TOF_TOP)     return "TOP";
+  return "?";
+}
+
 // One line per sensor: what it last reported and why it may have been dropped.
 // L1X status (Pololu VL53L1X::RangeStatus): 0 valid, 1 sigma fail, 2 signal
 // fail (weak return), 3 min-range clipped, 4 out of bounds, 5 hardware fail,
 // 7 wrap target, 13 min range fail, 255 none.
 void tofPrintRaw()
 {
-  Serial.println("ToF\tok\tused_mm\traw_mm\tstatus\tdata_age_ms\ti2c_err\taddr");
+  Serial.println("ToF\tname\tok\tused_mm\traw_mm\tstatus\tdata_age_ms\ti2c_err\taddr");
   for (int i = 0; i < TOF_COUNT; i++)
   {
     Serial.print(i);                          Serial.print('\t');
+    Serial.print(tofName(i));                 Serial.print('\t');
     Serial.print(tofSensorOk[i] ? 1 : 0);     Serial.print('\t');
     Serial.print(tofMM[i]);                   Serial.print('\t');
     Serial.print(rawMM[i]);                   Serial.print('\t');
