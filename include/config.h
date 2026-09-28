@@ -13,8 +13,8 @@
 //        bottom-left  VL53L0X  CON29  - weight detection / APPROACH steering
 //        bottom-right VL53L0X  CON28  - weight detection / APPROACH steering
 //        weight-detect (upright) CON27 - "bottom" of the lying-weight check
-//        rear         VL53L1X  CON30  - reversing clearance
-//        baseplate-top VL53L0X CON31  - "top" of the lying-weight check
+//        rear         VL53L0X  CON30  - reversing clearance (2026-09-28: was L1X)
+//        baseplate-top VL53L1X CON31  - "top" of the lying-weight check
 //                                       (2026-09-28: NOT YET FITTED, wiring
 //                                       in progress - see config.h TOF_TOP)
 //      1x SEN0628 8x8 ToF, front, CON64 (RAW I2C1 = Wire1) - obstacles
@@ -93,12 +93,14 @@ const byte SX1509_ADDRESS = 0x3F;
 const int TOF_BL      = 0;   // bottom-left  VL53L0X          CON29 / XSHUT2
 const int TOF_BR      = 1;   // bottom-right VL53L0X          CON28 / XSHUT1
 const int TOF_UPRIGHT = 2;   // weight-detect, across notch   CON27 / XSHUT0
-const int TOF_REAR    = 3;   // rear VL53L1X, long range      CON30 / XSHUT3
+const int TOF_REAR    = 3;   // rear VL53L0X (2026-09-28: swapped from L1X)  CON30 / XSHUT3
 // baseplate-top, lying-weight reject   CON31 / XSHUT4 - NOT YET FITTED
 // (2026-09-28, proposed): bench-confirmed blind to a weight lying on its
 // side, unlike TOF_UPRIGHT which still sees it. See navigation.cpp
 // lyingWeightConfirmed(). Address 0x38 (TOF_ADDRESS_START + 4) is clear of
-// the OLED (0x3C) and both SX1509s (0x3E/0x3F).
+// the OLED (0x3C) and both SX1509s (0x3E/0x3F). Team confirmed 2026-09-28
+// this is a VL53L1X (both "weight discrimination" sensors - this and
+// TOF_UPRIGHT - are L1X; the rear/reversing sensor is now the L0X instead).
 const int TOF_TOP     = 4;
 const int TOF_COUNT   = 5;
 
@@ -106,14 +108,16 @@ const int TOF_COUNT   = 5;
 const int XSHUT_TOF[TOF_COUNT] = { 2, 1, 0, 3, 4 };
 
 // sensor model at each index: 0 = VL53L0X (short), 1 = VL53L1X (long)
-// TODO(verify): weight-detect model - nav_test assumed a VL53L1X in short
-// mode; the wirefind report prints the real part per XSHUT line.
-const int TOF_TYPE[TOF_COUNT] = { 0, 0, 1, 1, 0 };
+// 2026-09-28: rear and top-baseplate swapped from the original assumption -
+// rear is now the VL53L0X, top-baseplate (TOF_TOP) is a VL53L1X alongside
+// the notch sensor (both are the "weight discrimination" pair).
+const int TOF_TYPE[TOF_COUNT] = { 0, 0, 1, 0, 1 };
 
 // VL53L1X distance mode per index (ignored for L0X): true = Short (to ~1.3m,
-// better in ambient light), false = Long (to ~4m). The notch sensor only
-// looks ~60-90mm, the rear wants range.
-const bool TOF_SHORT_MODE[TOF_COUNT] = { false, false, true, false, false };
+// better in ambient light), false = Long (to ~4m). The notch and top
+// sensors only look tens of mm, so both run Short; rear is now L0X so its
+// entry here is unused.
+const bool TOF_SHORT_MODE[TOF_COUNT] = { false, false, true, false, true };
 
 // Which RAW I2C bus each sub-assembly is cabled to. Only the ToFs (via I2C In
 // CON35) and the XSHUT expander (via I2C In CON26) matter here.
