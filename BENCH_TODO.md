@@ -33,9 +33,11 @@ Work top to bottom. 🤖 = Claude can do it from the laptop once the Teensy is p
     IMUPLUS and the heading carries on from its last value. Telemetry: `imuMode`, `imuRst`.
   - Boot-time I2C bus clear added for both buses (a sensor left mid-byte by a Teensy reset
     hung setup once inside the 8x8 init).
-- [ ] **Heading live check:** turn the robot ~90 deg by hand while logging `hdg` (on blocks it
-      can't rotate, so the load test only proved "no reset"). Then watch `hdg` / `imuRst` on the
-      next floor run with the new notch ToF fitted.
+- [x] **Heading live check (28/9, `docs/testdata/..._heading_load_rotate.log`):** tracks spinning on
+      blocks, robot turned by hand: `hdg` 0 -> 88.4 -> -3.1, `imuMode` 0x8 throughout, `imuRst` 0.
+      Boot bus clear fired for real ("Wire1 was stuck - bus cleared") and it booted normally.
+- [x] Lying (knocked-over) weights: notch ToF sees them (side-on 110 mm, end-on 149 mm vs empty
+      196-220 mm) but **team decision: ignore them** - no code change, REJECT already backs off.
 - [ ] **Low box: hit it, then read it as a weight.** Closing to 258 mm (turn is 250), the box
       dropped BELOW the band's view (reading jumped back to 353/401 mm), so it carried on and
       touched before turning. Then: after the turn it went to APPROACH / TURN_R / ESCAPE chasing
@@ -112,6 +114,14 @@ Flash `nav`, robot on blocks, say go before pressing GO. 🤖 logs each one.
         (bottom ToFs see the wall base at an angle, 8x8 band doesn't match on that side). Tune
         weight_detect (margin / require the candidate to persist / ignore when a wall is close).
   - [ ] **SCAN started with a wall 30 cm away** (6.1 s): only allow SCAN with clear space around.
+  - [ ] *(low priority, safety net)* **APPROACH "no progress" exit.** APPROACH only ends when the
+        weight gets closer / disappears or a wall appears on the 8x8. If the robot can't close in
+        (track stuck on a bump or ramp edge, wedged on something below the 8x8 rows, pushed by the
+        other robot, weight tight against a wall base) it would stay in APPROACH for the rest of the
+        round. Exit + suppress the target when the weight distance hasn't dropped for ~2 s or
+        `odomStalled()`. (Not a bug seen so far: staying in APPROACH on blocks 28/9 was expected -
+        the robot can't move there, and the detection was a real weight on its right.) Check on
+        the floor whether it ever triggers.
 - [ ] **Raise `DRIVE_SCALE_PCT` back to 100** (`config.h`, currently 50 = half the usable pulse
       range, a safety limiter for first floor tests). Once avoidance behaves, step 50 → 75 → 100 and
       retest avoidance at each step: stopping distance grows with speed, so the 8×8 thresholds may
