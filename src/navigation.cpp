@@ -44,16 +44,16 @@
 //                cycle: metal GONE from the notch = success (noteCollected);
 //                metal STILL there = the grab missed -> retry up to
 //                MAX_PICKUP_TRIES, then give up.
-//      REJECT    two triggers, same outcome (reverse REJECT_REVERSE_MS,
-//                pivot away, suppress the spot):
-//                  - lyingWeightConfirmed(): the notch ToF sees something but
-//                    the baseplate-top ToF doesn't (bench-confirmed blind to
-//                    a weight lying on its side) - checked in FORWARD,
-//                    APPROACH and CREEP, so a lying weight is rejected as
-//                    soon as it's seen rather than after creeping into it.
-//                  - CREEP times out with no metal ever seen (dummy/nothing).
+//      REJECT    CREEP times out with no metal ever seen (dummy/nothing) ->
+//                reverse REJECT_REVERSE_MS, pivot away, suppress the spot.
 //                No longer gated on the inductive sensor - that's PICKUP-only
 //                now (metalConfirmed()).
+//                A second trigger, lyingWeightConfirmed() (notch ToF sees
+//                something but the baseplate-top ToF doesn't - checked in
+//                FORWARD/APPROACH/CREEP so a lying weight is caught as soon
+//                as it's seen), exists but is DISABLED 2026-09-28
+//                (USE_LYING_WEIGHT_REJECT in config.h) - arena testing found
+//                it isn't working. See BENCH_TODO.md 2g.
 //      REPOSITION  after a pickup, turn away from the spot, then resume.
 //
 //  ROUND (round.h): weights are only approached while roundWantsWeights() -
@@ -100,7 +100,9 @@ static int  lastWeightSide = 0;
 static int  rejectDir = 1;
 static int  rejectCount = 0;
 static unsigned long metalSince = 0;
+#if USE_LYING_WEIGHT_REJECT
 static unsigned long lyingSince = 0;
+#endif
 
 static void setMode(int m) { mode = m; modeStart = millis(); }
 
@@ -134,6 +136,7 @@ static bool metalConfirmed()
 
 static int roomierSide();
 
+#if USE_LYING_WEIGHT_REJECT
 // TOF_TOP (baseplate-top, proposed - see config.h) is bench-confirmed blind
 // to a weight lying on its side; TOF_UPRIGHT (the notch ToF) still sees it.
 // So bottom-sees-something + top-sees-nothing, held steadily, means "an
@@ -142,6 +145,9 @@ static int roomierSide();
 // mid-recovery) this never fires, rather than treating "no top sensor" as
 // "definitely lying down" - that's what caused real weights to get rejected
 // before this sensor existed.
+//
+// DISABLED 2026-09-28 (USE_LYING_WEIGHT_REJECT in config.h): arena testing
+// found this isn't working as intended. See BENCH_TODO.md 2g.
 static bool lyingWeightConfirmed()
 {
   if (!tofOk(TOF_TOP) || !tofOk(TOF_UPRIGHT)) { lyingSince = 0; return false; }
@@ -154,6 +160,7 @@ static bool lyingWeightConfirmed()
   if (lyingSince == 0) lyingSince = millis();
   return millis() - lyingSince >= LYING_CONFIRM_MS;
 }
+#endif
 
 int rejectedCount() { return rejectCount; }
 
@@ -315,7 +322,9 @@ void navigationUpdate()
     {
       // a weight can end up in the notch without an approach (drove into it)
       if (wantWeights && metalConfirmed()) { pickupTries = 0; lastWeightSide = 0; startPickup(); }
+#if USE_LYING_WEIGHT_REJECT
       else if (wantWeights && lyingWeightConfirmed()) startReject("lying weight (top/bottom ToF)");
+#endif
       else if (obstacleLeft() && obstacleRight())
       {
         escapeSpinDir = roomierSide();
@@ -395,7 +404,9 @@ void navigationUpdate()
       if (!wantWeights) { setMode(MODE_FORWARD); break; }
 
       if (metalConfirmed()) { pickupTries = 0; startPickup(); break; }
+#if USE_LYING_WEIGHT_REJECT
       if (lyingWeightConfirmed()) { startReject("lying weight (top/bottom ToF)"); break; }
+#endif
 
       if (odomStalled() && held > APPROACH_PROGRESS_MS) { abandonApproach("tracks stalled"); break; }
 
@@ -430,7 +441,9 @@ void navigationUpdate()
       if (avoidIfBlocked()) break;
       if (!wantWeights) { setMode(MODE_FORWARD); break; }
       if (metalConfirmed()) { pickupTries = 0; startPickup(); }
+#if USE_LYING_WEIGHT_REJECT
       else if (lyingWeightConfirmed()) startReject("lying weight (top/bottom ToF)");
+#endif
       else if (weightFound && weightDistMM >= CREEP_START_MM) startApproach();   // re-acquired further out
       else if (held > CREEP_MAX_MS) startReject("no metal at the notch (dummy / lying weight / nothing)");
       break;

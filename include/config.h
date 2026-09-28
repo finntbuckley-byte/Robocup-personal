@@ -67,6 +67,12 @@
 #define USE_SIDE_IR     1
 #define USE_FUNNEL_SORT 1     // funnel ToF + inductive classification
 #define USE_SCAN        1
+// DISABLED 2026-09-28: arena testing found the top/bottom lying-weight
+// reject (navigation.cpp lyingWeightConfirmed()) isn't working as intended.
+// Sensor reading + the function itself stay in - only the FSM trigger is
+// switched off - so this can be picked back up without re-deriving it.
+// See BENCH_TODO.md 2g.
+#define USE_LYING_WEIGHT_REJECT 0
 
 // ---------------------------------------------------------------------------
 // ROBOT GEOMETRY  (mm)

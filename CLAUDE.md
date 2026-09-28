@@ -110,7 +110,7 @@ drive, 1× VL53L0X + 2× VL53L1X, serial ToF, 2× HC-SR04 ultrasound, DFRobot SE
 | **VL53L0X** (short range) | 2 | Left CON29 (XSHUT2), right CON28 (XSHUT1) | Bottom pair, **weight detection** + APPROACH steering |
 | **Weight-detect ToF** (VL53L1X per `nav_test`, unconfirmed) | 1 | CON27 (XSHUT0) | Across the notch. It's also the **funnel presence sensor** (replacing the ultrasound and funnel analog IR) and the **"bottom"** half of the lying-weight reject pair below |
 | **VL53L1X** (long range) | 1 | CON30 (XSHUT3) | Rear, reversing clearance |
-| **Baseplate-top ToF** (VL53L0X, proposed) | 1 | CON31 (XSHUT4), addr 0x38 | **NOT YET FITTED (2026-09-28, wiring in progress).** Bench-confirmed blind to a weight lying on its side, unlike the notch ToF above - the "top" half of the lying-weight reject pair. See `navigation.cpp` `lyingWeightConfirmed()` |
+| **Baseplate-top ToF** (VL53L0X, proposed) | 1 | CON31 (XSHUT4), addr 0x38 | Bench-confirmed blind to a weight lying on its side, unlike the notch ToF above - the "top" half of the lying-weight reject pair. Now fitted and readable (`u`/telemetry), but the FSM trigger (`navigation.cpp` `lyingWeightConfirmed()`) is **disabled 2026-09-28** (`USE_LYING_WEIGHT_REJECT`) - arena testing found it wasn't working. See `BENCH_TODO.md` 2g |
 | **GP2Y0A21** analog IR (white, 100–800 mm) | 2 | Left CON24 (A9Z, pin 23), right CON23 (A8Z, pin 22) | Side-facing, wall-scrape nudge |
 | **Inductive proximity** (LJ18A3-8-Z/BY) | 1 | Via the inductive level-shift board to CON70 (A6Z, pin 20) | Front-on at the notch, ~40 mm up. **Pickup trigger only** (2026-09-28: no longer gates REJECT - see below). Active LOW (~500 counts metal, ~3485 clear) |
 | **IMU** (SEN0253 = BNO055, 0x28) | 1 | **Not fitted for now** | Homing, planned |
@@ -246,9 +246,9 @@ goes stale, the robot crawls and ignores weights.
 | `APPROACH` | Steer on the bottom VL53L0X pair: **PD** when both see the weight, otherwise a one-sided arc. The pickup is **not** triggered by distance |
 | `CREEP` | The bottom pair lost a candidate within 20 cm (they're blind once it's in the notch), so creep straight for up to 1 s |
 | `PICKUP` | **Triggered by the inductive sensor reading metal** (debounced 60 ms). Stop, run the crane, wait for `collection_busy()`. Metal gone afterwards = success (`noteCollected`); still there = retry once |
-| `REJECT` | Two triggers, same reverse ~10 cm + pivot + 4 s spot-suppress: (1) `lyingWeightConfirmed()` - the notch ToF sees something but the baseplate-top ToF doesn't (checked in FORWARD/APPROACH/CREEP, so a lying weight is caught as soon as it's seen, not after creeping into it), or (2) CREEP times out with no metal ever seen (dummy/nothing). No longer gated on the inductive sensor. **Unproven:** the top sensor isn't fitted yet (2026-09-28), so trigger (1) is draft code only; the flinger is the fallback |
+| `REJECT` | CREEP times out with no metal ever seen (dummy/nothing): reverse ~10 cm, pivot away, suppress the spot 4 s. No longer gated on the inductive sensor. A second trigger, `lyingWeightConfirmed()` (notch ToF sees something but the baseplate-top ToF doesn't - checked in FORWARD/APPROACH/CREEP), exists but is **DISABLED 2026-09-28** (`USE_LYING_WEIGHT_REJECT` in `config.h`) - arena testing found it wasn't working. See `BENCH_TODO.md` 2g |
 
-**Team decision 2026-09-28, superseded same day:** knocked-over (lying) weights were initially just *ignored* (never read as metal, so REJECT only caught them incidentally via the CREEP timeout). Adding a baseplate-top ToF (bench-confirmed blind to a weight on its side, unlike the notch ToF) turns this into an active, fast reject instead - see `lyingWeightConfirmed()` above. Both target and dummy weights are the same cylinder, so this still can't tell steel from plastic; it only confirms upright-and-tall-enough vs not.
+**Team decision 2026-09-28, tried and reverted same day:** knocked-over (lying) weights are back to just being *ignored* (never read as metal, so REJECT only catches them incidentally via the CREEP timeout). A baseplate-top ToF was added to turn this into an active, fast reject (bottom-sees-something + top-sees-nothing, bench-confirmed blind to a weight on its side) - `lyingWeightConfirmed()` still exists in `navigation.cpp`, but arena testing found the behaviour isn't working, so it's switched off pending another attempt (`BENCH_TODO.md` 2g).
 | `REPOSITION` | Turn away after a pickup |
 
 Round strategy: stop collecting at **3 targets on board** (`MAX_TARGETS_ON_BOARD`). Planned: the
@@ -264,10 +264,11 @@ time-based return (`USE_HOMING`) is off until it exists.
   weight is seated.
 - **2026-09-28: REJECT no longer reads the inductive sensor at all.** It used to also gate a
   settle-timer-based back-away check, but that was rejecting real upright weights too fast with no
-  independent way to confirm orientation. A new baseplate-top ToF (`TOF_TOP`, not yet fitted - see
-  the sensor table above) replaces it: bottom-sees-something + top-sees-nothing means "not
-  standing up," checked directly rather than inferred from settle timing. Inductive is PICKUP-only
-  now.
+  independent way to confirm orientation. Inductive is PICKUP-only now. A baseplate-top ToF
+  (`TOF_TOP`) was added to replace that check (bottom-sees-something + top-sees-nothing means "not
+  standing up," checked directly rather than inferred from settle timing), but its trigger is
+  **disabled** (`USE_LYING_WEIGHT_REJECT` in `config.h`) as of 2026-09-28 - arena testing found it
+  isn't working. Revisit per `BENCH_TODO.md` 2g.
 - Inductive proximity is the only viable metal classifier in the parts catalogue.
 - **Crane moves are always non-blocking** (`SmoothServo`). Never use the blocking
   `smoothServoWriteSlow()` in the FSM: it stalls sensors, the round timer and the gate.

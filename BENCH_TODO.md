@@ -3,7 +3,16 @@
 Work top to bottom. 🤖 = Claude can do it from the laptop once the Teensy is plugged in (with a
 **data** USB cable).
 
-## 0. Next session (from 27–28/9 late)
+## 0. Next session (from 27–28/9 late, plus 29/9 plan)
+- [ ] **Lying-weight reject: try again.** The top/bottom ToF reject (`lyingWeightConfirmed()`,
+      `USE_LYING_WEIGHT_REJECT` in `config.h`) was switched off 28/9 - arena testing found it
+      wasn't working. Sensor + function are still in, just not wired into the FSM. See §2g for
+      what to check (thresholds, mounting height, whether it's even triggering) before turning it
+      back on.
+- [ ] **Integrate a servo board that protects against short circuits** on the crane servo line.
+      (Note: this may or may not be the same 504/514-family board already noted below as "not
+      available" for back-EMF isolation - confirm which board this actually is and what fault it
+      protects against before wiring it in.)
 - [x] **Notch ToF fault (28/9): the sensor (or its cable) was faulty, not the port.** Swapping
       CON27 <-> CON30 moved the fault with the sensor; a replacement on CON27 then ranged cleanly
       (all 4 ToFs stayed at 0x34-0x37, no errors). Positions re-confirmed: weight in the notch =
@@ -124,29 +133,36 @@ overshoot, add KI last to kill steady-state drift, then read the settled integra
       drifting for the first second while KI winds up from zero.
 - [ ] Blocked on the flange reprint per §0 before the ruler runs are meaningful.
 
-## 2g. Top/bottom baseplate ToF - lying-weight reject (draft code in, hardware not fitted)
-New 5th ToF (`TOF_TOP`, proposed CON31/XSHUT4, VL53L0X, addr 0x38) pairs with the existing notch
-ToF (`TOF_UPRIGHT`) as "bottom": bottom sees something + top doesn't (bench-confirmed blind to a
+## 2g. Top/bottom baseplate ToF - lying-weight reject (DISABLED 28/9 - not working, retry planned)
+5th ToF (`TOF_TOP`, CON31/XSHUT4, VL53L0X, addr 0x38) pairs with the existing notch ToF
+(`TOF_UPRIGHT`) as "bottom": bottom sees something + top doesn't (bench-confirmed blind to a
 weight on its side) = reject before creeping it in. Replaces the old inductive-gated,
 settle-timer back-away check, which was rejecting real upright weights too fast with no top
-sensor to confirm against. Code (`navigation.cpp` `lyingWeightConfirmed()`, `config.h`
-`BOTTOM_PRESENT_MM`/`TOP_PRESENT_MM`/`LYING_CONFIRM_MS`) is drafted but **not tested on any
-hardware** - the top sensor isn't wired yet (in progress 28/9).
-- [ ] Wire CON31 to the new VL53L0X, run `wirefind` to confirm it answers on XSHUT4 and pick up
-      an address - check it lands where `TOF_ADDRESS_START + 4` (0x38) expects.
+sensor to confirm against.
+
+**Status 28/9:** the top sensor is now wired and readable (`u`/telemetry), but arena testing found
+the reject behaviour itself isn't working - it wasn't reliably catching lying weights and/or was
+still misfiring on real ones. **Switched off** (`USE_LYING_WEIGHT_REJECT 0` in `config.h`) so the
+robot falls back to the old "ignore lying weights" behaviour while this gets re-worked. The
+sensor reading and `lyingWeightConfirmed()` itself are untouched - only the FSM call sites are
+guarded out - so re-enabling is a one-line flip once it's fixed.
+- [ ] **Retry tomorrow.** Before flipping `USE_LYING_WEIGHT_REJECT` back to 1, work out *why* it
+      wasn't working - pull `u`/telemetry (`TOP`/`TOPok`) on a real lying weight vs a real upright
+      weight and check: is the top sensor actually seeing/not-seeing what's expected at
+      `TOP_PRESENT_MM` (80mm, still a placeholder)? Is the bottom threshold (`BOTTOM_PRESENT_MM`,
+      160mm) even triggering "present" on a real lying weight?
 - [ ] Confirm mounting height above the baseplate matches what's needed to stay blind to a lying
-      weight while still seeing an upright one - this was bench-tested on the bench rig, not yet
-      on the actual mounted sensor.
+      weight while still seeing an upright one - this was bench-tested on the standalone rig, not
+      yet fully validated on the mounted sensor in the actual notch geometry.
 - [ ] **Bench-characterise both thresholds** the same way `FUNNEL_PRESENT_MM` was: log raw mm for
       steel upright, plastic upright, a lying weight, and empty, for BOTH `tofUpright` and
-      `tofTop`. Set `BOTTOM_PRESENT_MM`/`TOP_PRESENT_MM` from real data - both are placeholders
-      right now (160mm / 80mm).
+      `tofTop`. Set `BOTTOM_PRESENT_MM`/`TOP_PRESENT_MM` from real data - both are still
+      placeholders (160mm / 80mm) and likely the root cause of the misfire.
 - [ ] Confirm `LYING_CONFIRM_MS` (100ms) doesn't false-reject a real weight still sliding into
-      place, the same failure mode the old check had - watch for this specifically on the first
-      full-round test with the new sensor wired in.
-- [ ] Flash `nav`, robot on blocks: place a lying weight in the notch mid-round and confirm REJECT
-      fires quickly (before CREEP would have timed out); place a real upright weight and confirm
-      it does NOT reject.
+      place, the same failure mode the old inductive-gated check had.
+- [ ] Once thresholds look right on the bench: flash `nav`, robot on blocks, flip
+      `USE_LYING_WEIGHT_REJECT` to 1, place a lying weight in the notch mid-round and confirm
+      REJECT fires quickly; place a real upright weight and confirm it does NOT reject.
 
 ## 2d. Third weight carried on the magnet (held at rest, not dropped)
 - [x] Magnet coils **do get hot** in extended use (partner, from earlier testing), so a full-power
