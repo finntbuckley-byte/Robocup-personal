@@ -194,6 +194,9 @@ void tofInit()
 
     bool ok = setupSensor(i);
     tofSensorOk[i] = ok;
+    // failed: hold it in shutdown so it can't sit on 0x29 and block the
+    // next sensor's setup; tofUpdate() keeps retrying it (loose cable reseated)
+    if (!ok) xshutWrite(xshutMask & ~(1 << XSHUT_TOF[i]));
     Serial.print("ToF "); Serial.print(i);
     Serial.print(" (XSHUT"); Serial.print(XSHUT_TOF[i]);
     Serial.print(" CON"); Serial.print(27 + XSHUT_TOF[i]); Serial.print(", ");
@@ -212,7 +215,18 @@ void tofUpdate()
   if (firstUpdateMs == 0) firstUpdateMs = now;
   for (int i = 0; i < TOF_COUNT; i++)
   {
-    if (!tofSensorOk[i]) continue;   // never came up at boot - not ours to chase
+    if (!tofSensorOk[i])
+    {
+      // failed at boot (28/9: CON28 cable knocked loose) - keep trying it
+      if (!tofIndexEnabled(i)) continue;
+      unsigned long wait = recoverFailsInRow[i] >= 3 ? TOF_RECOVER_BACKOFF_MS : TOF_RECOVER_INTERVAL_MS;
+      if (now - lastRecoverMs[i] >= wait)
+      {
+        recoverSensor(i);
+        if (recoveryPending[i]) tofSensorOk[i] = true;   // set up now - normal stale/recovery rules apply
+      }
+      continue;
+    }
 
     // stale: no new data for TOF_STALE_MS since the last reading (or since setup)
     unsigned long since = lastDataMs[i] ? lastDataMs[i]

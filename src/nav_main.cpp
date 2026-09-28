@@ -40,6 +40,7 @@
 #include "round.h"
 #include "gate.h"
 #include "odometry.h"
+#include "pose.h"
 #include "imu.h"
 
 static bool killed = false;
@@ -138,7 +139,7 @@ static bool telemetryOn = true;
 
 static void printTelemetryHeader()
 {
-  Serial.println("ms\tround\tmode\tBL\tBR\tUP\tREAR\tX8L\tX8R\tIRL\tIRR\tfun\tind\tW\tpicks\treal\tdummy\tonb\trej\tabd\tdrvL\tdrvR\todo\todoRaw\tslip\tstall\thdg\timuMode\timuRst\ttofRec\tgoD\tgoA");
+  Serial.println("ms\tround\tmode\tBL\tBR\tUP\tREAR\tX8L\tX8R\tIRL\tIRR\tfun\tind\tW\tpicks\treal\tdummy\tonb\trej\tabd\tdrvL\tdrvR\todo\todoRaw\tslip\tstall\thdg\tpx\tpy\timuMode\timuRst\ttofRec\tgoD\tgoA");
 }
 
 static void printTelemetry()
@@ -182,6 +183,8 @@ static void printTelemetry()
   Serial.print(odomStalled() ? 1 : 0);  Serial.print('\t');
   if (imuOk()) Serial.print(imuHeadingDeg(), 1); else Serial.print('-');   // + = right of start
   Serial.print('\t');
+  Serial.print(poseXmm(), 0);           Serial.print('\t');   // mm forward of the start
+  Serial.print(poseYmm(), 0);           Serial.print('\t');   // mm right of the start
   Serial.print("0x"); Serial.print(imuOprMode(), HEX); Serial.print('\t');   // 0x8 = IMUPLUS, 0x0 = rebooted
   Serial.print(imuResetCount());        Serial.print('\t');
   Serial.print(tofRecoverCount());      Serial.print('\t');
@@ -246,6 +249,7 @@ void loop()
   irSensorsUpdate();
   odomUpdate();          // after the 8x8 / rear ToF - the slip check reads them
   imuUpdate();
+  poseUpdate();          // x/y from the start (logging only for now)
 
   // 2. weight candidate
   weightDetectUpdate();
@@ -259,7 +263,7 @@ void loop()
 
   // 5. round + navigation
   roundUpdate();
-  if (roundJustStarted()) { navigationInit(); odomReset(); imuZero(); headingHoldReset(); }   // distance + heading from the start position
+  if (roundJustStarted()) { navigationInit(); odomReset(); imuZero(); headingHoldReset(); poseReset(); }   // distance + heading from the start position
 
   if (killed)             driveHardStop();
   else if (!roundRunning()) stopMotors();
