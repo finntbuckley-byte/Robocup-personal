@@ -127,7 +127,7 @@ static void printHelp()
   Serial.println("\n=========== nav build ===========");
   Serial.println(" ?  this menu");
   Serial.println(" g  print the 8x8 grid (orientation / band check)");
-  Serial.println(" u  ToF diagnostics: raw mm, status, data age");
+  Serial.println(" u  live ToF line (name header + one updating line) - press again to stop");
   Serial.println(" i  I2C scan of Wire and Wire1");
   Serial.println(" t  telemetry on/off");
   Serial.println(" x  KILL - stop motors until reset");
@@ -273,6 +273,7 @@ void loop()
 
   // 6. telemetry
   printTelemetry();
+  tofPrintRawTick();
 }
 
 #endif // NAV_BUILD

@@ -3,6 +3,7 @@
 #include <Wire.h>
 #include <VL53L0X.h>
 #include <VL53L1X.h>
+#include <stdio.h>   // snprintf, for the live ToF line's fixed-width padding
 
 // ============================================================================
 //  tof.cpp  -  5x ToF on the SX1509 XSHUT chain.
@@ -292,27 +293,58 @@ static const char* tofName(int i)
   return "?";
 }
 
-// One line per sensor: what it last reported and why it may have been dropped.
-// L1X status (Pololu VL53L1X::RangeStatus): 0 valid, 1 sigma fail, 2 signal
-// fail (weak return), 3 min-range clipped, 4 out of bounds, 5 hardware fail,
-// 7 wrap target, 13 min range fail, 255 none.
-void tofPrintRaw()
+// ---------------------------------------------------------------------------
+// LIVE ToF LINE  -  'u' toggles this on/off (nav_main.cpp). A header row
+// (sensor names) is printed once, then a single line is overwritten in
+// place ('\r', no newline) every RAW_LIVE_MS instead of scrolling a new
+// block of rows on every press - much easier to watch while testing.
+// Each cell is padded to a fixed width so a shorter new value fully
+// overwrites a longer old one (no leftover characters from the previous
+// print). ok/status/age/i2c/addr detail from the old one-shot dump isn't
+// shown here - it's still in the main 't' telemetry (TOP/TOPok columns) for
+// anything needing the full picture.
+// ---------------------------------------------------------------------------
+static bool rawLiveOn = false;
+static unsigned long rawLiveLast = 0;
+static const unsigned long RAW_LIVE_MS = 150;
+
+static void printRawHeader()
 {
-  Serial.println("ToF\tname\tok\tused_mm\traw_mm\tstatus\tdata_age_ms\ti2c_err\taddr");
+  Serial.println();
+  char buf[16];
   for (int i = 0; i < TOF_COUNT; i++)
   {
-    Serial.print(i);                          Serial.print('\t');
-    Serial.print(tofName(i));                 Serial.print('\t');
-    Serial.print(tofSensorOk[i] ? 1 : 0);     Serial.print('\t');
-    Serial.print(tofMM[i]);                   Serial.print('\t');
-    Serial.print(rawMM[i]);                   Serial.print('\t');
-    Serial.print(rawStatus[i]);               Serial.print('\t');
-    if (lastDataMs[i]) Serial.print(millis() - lastDataMs[i]);
-    else               Serial.print("never");
-    // last I2C result for that sensor: 0 ok, 2 address NACK, 3 data NACK, 4 other
-    Serial.print('\t');
-    Serial.print(TOF_TYPE[i] == 1 ? l1x[i].last_status : l0x[i].last_status);
-    Serial.print("\t0x");
-    Serial.println(TOF_TYPE[i] == 1 ? l1x[i].getAddress() : l0x[i].getAddress(), HEX);
+    snprintf(buf, sizeof(buf), "%-12s", tofName(i));
+    Serial.print(buf);
   }
+  Serial.println();
+}
+
+static void printRawLive()
+{
+  Serial.print('\r');
+  char cell[16], buf[16];
+  for (int i = 0; i < TOF_COUNT; i++)
+  {
+    snprintf(cell, sizeof(cell), "%s%4u", tofSensorOk[i] ? "ok " : "-- ", tofMM[i]);
+    snprintf(buf, sizeof(buf), "%-12s", cell);
+    Serial.print(buf);
+  }
+}
+
+// 'u': toggle the live line on/off
+void tofPrintRaw()
+{
+  rawLiveOn = !rawLiveOn;
+  if (rawLiveOn) { printRawHeader(); rawLiveLast = 0; }
+  else            Serial.println("\nToF live stopped");
+}
+
+// called every loop() (nav_main.cpp) - no-op unless the live line is on
+void tofPrintRawTick()
+{
+  if (!rawLiveOn) return;
+  if (millis() - rawLiveLast < RAW_LIVE_MS) return;
+  rawLiveLast = millis();
+  printRawLive();
 }

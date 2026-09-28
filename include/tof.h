@@ -25,6 +25,7 @@ void tofUpdate();
 bool tofOk(int index);     // sensor initialised AND producing fresh data (false while stale/recovering)
 int  tofRecoverCount();    // times a dropped-out ToF was brought back (telemetry)
 bool rearBlocked();
-void tofPrintRaw();        // diagnostics ('u'): raw mm + status + data age + I2C error per sensor
+void tofPrintRaw();        // 'u': toggle the live ToF line on/off
+void tofPrintRawTick();    // call every loop() - no-op unless the live line is on
 
 #endif /* __TOF_H */
