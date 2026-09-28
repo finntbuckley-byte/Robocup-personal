@@ -4,7 +4,11 @@
 void collection_init(void);
 void collection_update(void);
 void magnet_collect(void);
-void collection_start(void);
+// holdAtRest: skip the normal drop-into-storage and instead ease the arm to
+// rest and hold the magnet there at MAGNET_HOLD_PCT indefinitely (does not
+// turn off - not even at round end - only a power cycle drops it). For the
+// 3rd target, carried on the arm instead of stored. See BENCH_TODO.md 2d.
+void collection_start(bool holdAtRest = false);
 bool collection_busy(void);
 
 // Crane angles (deg) + speeds (deg/s). Start from config.h CRANE_*; the

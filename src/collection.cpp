@@ -4,8 +4,7 @@
 #include "smooth_servo.h"
 #include "config.h"   // CRANE_* angles and speeds
 
-#define MAG1 PIN_MAG1        // pins now live in config.h
-#define MAG2 PIN_MAG2
+#define MAGNET PIN_MAGNET     // pin lives in config.h - single magnet, PWM-capable (2026-09-28)
 
 #define BIG_SERVO PIN_CRANE_SERVO
 #define SERVODELAY1 1200 //update after testing, motion from starting position to weight pickup
@@ -37,16 +36,17 @@ enum CollectionState
     COLLECTION_PICKUP,
     COLLECTION_MOVE_TO_DROP,
     COLLECTION_DROP,
+    COLLECTION_HOLD,       // 3rd target: ease to rest, magnet stays on at MAGNET_HOLD_PCT
     COLLECTION_FINISHED
 };
 
 static CollectionState state = COLLECTION_IDLE;
+static bool holdAtRestArmed = false;   // this cycle's collection_start(true) request
 
 
 void collection_init(void)
 {
-    pinMode(MAG2, OUTPUT);
-    pinMode(MAG1, OUTPUT);
+    pinMode(MAGNET, OUTPUT);
     bigServo.attach(BIG_SERVO);
     arm.jumpTo(tuning.restAngle); // start parked (replaces the per-tick write(1) in collection_update)
 }
@@ -72,20 +72,21 @@ int  collection_arm_angle(void) { return arm.angle(); }
 
 void collection_magnets(bool on)
 {
-    digitalWrite(MAG1, on ? HIGH : LOW);
-    digitalWrite(MAG2, on ? HIGH : LOW);
+    analogWrite(MAGNET, on ? 255 : 0);
 }
 
-void collection_start(void)
+void collection_start(bool holdAtRest)
 {
     if (state == COLLECTION_IDLE)
     {
         collectionStateEntryTime = millis();
         state = COLLECTION_PICKUP; //move into the pickup state which takes it from there
-        Serial.println(F("[collection] START -> PICKUP"));
-        collectionStateEntry = true; 
+        holdAtRestArmed = holdAtRest;
+        Serial.print(F("[collection] START -> PICKUP"));
+        Serial.println(holdAtRest ? F(" (hold at rest - 3rd target)") : F(""));
+        collectionStateEntry = true;
     }
-    else 
+    else
     {
         Serial.println(F("[collection] start ignored, cycle already in progress"));
         return;
@@ -111,20 +112,51 @@ void collection_update(void)
                 Serial.print(SERVODELAY1);
                 Serial.println(F("ms)"));
                 arm.moveTo(tuning.pickupAngle, tuning.pickupDps); // eased
-                digitalWrite(MAG1, HIGH);
-                digitalWrite(MAG2, HIGH); //magnets are now on and will pick up weight when servo finishes moving
+                analogWrite(MAGNET, 255); //magnet is now on and will pick up weight when servo finishes moving
                 collectionStateEntry = false;
             }
 
             if (millis() - collectionStateEntryTime >= SERVODELAY1 && !arm.busy())
             {
-                Serial.println(F("[collection] PICKUP -> MOVE_TO_DROP"));
-                state = COLLECTION_MOVE_TO_DROP;
+                if (holdAtRestArmed)
+                {
+                    Serial.println(F("[collection] PICKUP -> HOLD"));
+                    state = COLLECTION_HOLD;
+                }
+                else
+                {
+                    Serial.println(F("[collection] PICKUP -> MOVE_TO_DROP"));
+                    state = COLLECTION_MOVE_TO_DROP;
+                }
                 collectionStateEntryTime = millis();
                 collectionStateEntry = true;
             }
             break;
-        case COLLECTION_MOVE_TO_DROP:  
+
+        case COLLECTION_HOLD:
+            if (collectionStateEntry)
+            {
+                Serial.print(F("[collection] HOLD: easing to rest ")); Serial.print(tuning.restAngle);
+                Serial.print(F(" deg @ ")); Serial.print(tuning.restDps, 0);
+                Serial.println(F(" deg/s, magnet stays ON (reduced once parked)"));
+                arm.moveTo(tuning.restAngle, tuning.restDps); // eased - magnet stays at full power until parked
+                collectionStateEntry = false;
+            }
+
+            if (!arm.busy())
+            {
+                // Reduced holding level, set once and never turned off from here -
+                // not by collection_magnets(), not at round end. Only a power
+                // cycle drops it. See BENCH_TODO.md 2d / config.h MAGNET_HOLD_PCT.
+                analogWrite(MAGNET, (int)((long)MAGNET_HOLD_PCT * 255 / 100));
+                Serial.print(F("[collection] HOLD -> IDLE, magnet held at "));
+                Serial.print(MAGNET_HOLD_PCT); Serial.println(F("% indefinitely"));
+                state = COLLECTION_IDLE;
+                holdAtRestArmed = false;
+            }
+            break;
+
+        case COLLECTION_MOVE_TO_DROP:
             if (collectionStateEntry)
             {
                 Serial.print(F("[collection] MOVE_TO_DROP: easing ")); Serial.print(arm.angle());
@@ -162,10 +194,9 @@ void collection_update(void)
             // non-blocking version of the old delay(1000) before magnets off
             if (!magnetsReleased && millis() - collectionStateEntryTime >= DROP_SETTLE_MS)
             {
-                digitalWrite(MAG1, LOW);
-                digitalWrite(MAG2, LOW);
+                analogWrite(MAGNET, 0);
                 magnetsReleased = true;
-                Serial.println(F("[collection] DROP: magnets OFF - weight released"));
+                Serial.println(F("[collection] DROP: magnet OFF - weight released"));
             }
 
             // same timing as before: WEIGHTDROPDELAY counts from DROP entry, so with

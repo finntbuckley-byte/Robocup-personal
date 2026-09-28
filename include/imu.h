@@ -25,4 +25,19 @@ int   headingHoldSteer(float targetDeg);
 void  headingHoldReset();
 float headingHoldIntegral();  // the I term's current % (the learned drag bias)
 
+// Live-tunable copy of the HEADING_K* gains (config.h HeadingTuning below),
+// starting from the config.h values. headingHoldSteer() reads from this, not
+// the raw constants, so a bench tool (motiontest env) can adjust gains without
+// a reflash. nav never calls headingTuningSet(), so its behaviour is unchanged
+// unless a test build deliberately overrides it. Once a setting works, copy it
+// back into config.h by hand (motiontest prints paste-ready lines with 's').
+struct HeadingTuning
+{
+  float kp, ki, kd;
+  float iMax;
+  float iStart;
+  int   maxSteer;
+};
+HeadingTuning &headingTuning();   // mutable reference - edit fields directly to tune live
+
 #endif /* __IMU_H */

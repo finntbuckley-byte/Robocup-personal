@@ -9,17 +9,15 @@ Work top to bottom. 🤖 = Claude can do it from the laptop once the Teensy is p
       (all 4 ToFs stayed at 0x34-0x37, no errors). Positions re-confirmed: weight in the notch =
       59 mm (same as 25/9, so `FUNNEL_PRESENT_MM` 66 still holds), hand behind = rear 68 mm.
       **Label the faulty sensor and keep it off the robot.** TEMP diagnostics removed; `u`/`i` kept.
-- [ ] **After the flange reprint:** ruler runs again (enctest GO, hold on). Read the steady
-      `integral` from the traces (`T`) → `HEADING_I_START` in config.h (runs that started
-      pre-loaded at ~-8 to -10 % were the straightest).
+- [x] **Flange reprint: done.** Ruler runs / `HEADING_I_START` and `ENC_COUNTS_PER_M` are covered
+      by the new §2f (motion/PID calibration) and §4 encoder recheck items - no longer blocked.
 - [ ] Recalibrate `ENC_COUNTS_PER_M` **with the heading hold on**, on the **arena floor**: hold-on
       runs gave ~15,750–15,900 counts/m vs 15,640 without (steering scrub adds counts).
 - [x] (record) Heading-hold findings 28/9: IMU matches the ruler within ~1 deg; hold cut the turn from
       8–12 deg to 1–5 deg over ~60 cm. The robot runs straight for ~1 s then starts turning
       right in most runs - partly the floor at the first test spot, partly something on the robot
       (check again after the reprint).
-- [ ] 8x8 check on the floor before the obstacle test: `g` - r5–r7 floor ~0.4–0.7 m, r2–r4 clear
-      (0 or >1.5 m) with nothing ahead; a box 50 cm ahead shows in r2–r4.
+- [x] 8x8 floor check: done, good.
 - [x] **First wall test (28/9, log `docs/testdata/2026-09-28_nav_wall_test.log`):** drove at a
       low box from ~68 cm; 8x8 closure matched the encoders (418 vs 435 mm); at ~25 cm it turned
       LEFT towards the open side (correct direction - motor fix confirmed); GO-stop worked.
@@ -46,14 +44,8 @@ Work top to bottom. 🤖 = Claude can do it from the laptop once the Teensy is p
       Boot bus clear fired for real ("Wire1 was stuck - bus cleared") and it booted normally.
 - [x] Lying (knocked-over) weights: notch ToF sees them (side-on 110 mm, end-on 149 mm vs empty
       196-220 mm) but **team decision: ignore them** - no code change, REJECT already backs off.
-- [ ] **Low box: hit it, then read it as a weight.** Closing to 258 mm (turn is 250), the box
-      dropped BELOW the band's view (reading jumped back to 353/401 mm), so it carried on and
-      touched before turning. Then: after the turn it went to APPROACH / TURN_R / ESCAPE chasing
-      the box - the bottom ToFs saw it but the 8x8 band looked over it (it's low), which is
-      exactly the weight signature. Arena walls are 400 mm so they shouldn't do this, but low
-      obstacles / the other robot might. Repeat the test with a wall or tall box (>= 300 mm).
-- [ ] Head-on walls: the CAUTION veer barely acts (both halves equal), so it goes straight to
-      the 25 cm turn. Fine for now; watch it at higher DRIVE_SCALE_PCT (stopping distance).
+- [x] **Low box hit-then-chase bug: solved.**
+- [x] **Head-on wall CAUTION veer: solved.**
 
 ## 1. Bench: robot on blocks, tracks off the ground
 - [x] 🤖 **Wire finder** (done 25/9: ToFs + expander on Wire, 8×8 on Wire1, CON27 = L1X): `pio run -e wirefind -t upload`. It finds:
@@ -98,59 +90,86 @@ Flash `nav`, robot on blocks, say go before pressing GO. 🤖 logs each one.
 - [x] (28/9: stopped itself at 118.5 s, no resets, IMU 0 resets, 8x8 never stale, pickup counted) **Full 2-min round, hands off:** stops itself at ~118.5 s, no hang, no reset (`ms` never jumps
       back to 0). With a pickup in it, this also checks crane + both tracks together don't brown out.
 
+## 2e. Notch back-away (settle logic, `notch_backaway_test.cpp` / `notchtest` env) - DEFERRED 28/9
+Team decision 28/9: stop tuning this in isolation on the bench. `UPRIGHT_BACKAWAY_SETTLE_MS` will
+be calibrated during whole-round testing instead, against real funnel/CREEP approaches rather than
+a hand placing objects. Bench findings kept for when this is picked back up:
+- [ ] **`UPRIGHT_BACKAWAY_SETTLE_MS`**: the anchor/window settle check (not frame-to-frame) is
+      sensitive to how slowly an object is placed - a hand placing a weight naturally decelerates on
+      approach, and at 400ms the trigger still fired ~400-600ms before the inductive sensor caught up
+      on a slow creep-in. 800ms passed that case; `config.h` currently has 600ms, untested. Confirm/
+      retune against real robot approaches once whole-round testing is underway, not on the bench.
+- [ ] **Define proper "ignore this object" behaviour for anything confirmed not upright metal**
+      (dummy, lying weight, or anything else the back-away/REJECT path backs off from), not just the
+      existing 4 s `REJECT_SUPPRESS_MS` spot-ignore. Right now a rejected object can be re-found and
+      re-approached repeatedly once the 4 s window lapses, wasting round time on the same dummy. Needs
+      a design decision: how "confirmed non-target" is remembered (position via odometry/IMU, since
+      there's no colour/ID to recognise it by), how long/whether it's ignored for the rest of the
+      round vs. just longer than 4 s, and how that interacts with a real target weight later ending up
+      near the same spot.
+
+## 2f. Motion / heading-hold PID calibration (`enctest` env, extended 28/9)
+`encoder_test.cpp` now doubles as a live PID tuning rig, not just encoder bring-up: `kp <v>` /
+`ki <v>` / `kd <v>` / `imax <v>` / `maxsteer <v>` set `headingTuning()` gains live (no reflash),
+`s` prints the current gains AND the learned integral, paste-ready for `config.h`
+(`HEADING_KP/KI/KD/I_MAX/MAX_STEER/I_START`). `T` still prints the per-run heading/steer/integral
+trace. Recommended order (also in the file header): KP alone until it weaves, add KD to damp
+overshoot, add KI last to kill steady-state drift, then read the settled integral into
+`HEADING_I_START`.
+- [ ] **Tune KP/KI/KD on the arena floor** using `enctest`'s marked-distance runs, `H` to toggle
+      hold on/off for comparison. 3-5 repeats per gain change (single lucky/unlucky run isn't
+      enough), log both final heading error (`hdg`) and mid-run wobble from the `T` trace.
+- [ ] **Read `HEADING_I_START`** off a settled `T` trace once KP/KI/KD are decided, and put it in
+      `config.h` so rounds start already compensated for the track/floor drag bias instead of
+      drifting for the first second while KI winds up from zero.
+- [ ] Blocked on the flange reprint per §0 before the ruler runs are meaningful.
+
 ## 2d. Third weight carried on the magnet (held at rest, not dropped)
 - [x] Magnet coils **do get hot** in extended use (partner, from earlier testing), so a full-power
       hold for ~100 s isn't safe. Plan: full power to grab, then a **reduced PWM holding level**.
-- [ ] **Move the magnets to PWM pins.** Pins 26/27 (CON74/75) have **no PWM** on the Teensy 4.0
-      (confirmed from the core's pwm.c). Move to **CON72 (A10Z, pin 24)** and **CON73 (A11Z, pin 25)**:
-      both free, both PWM on the same timer. (They double as Wire2, which isn't used.)
-- [ ] 🤖 Code: magnet pins → 24/25, `analogWrite` holding level, and a "pick up and hold" crane
-      cycle for the 3rd target (grab at full power → rest → drop to holding level). Needs the
-      partner's OK (collection.cpp).
-- [ ] **PWM hold test:** 1 kg weight held at rest, stepping the holding level down (e.g. 100 → 70 →
-      50 → 35 %) to find the lowest that still holds through a shake. Then 2 min at that level:
-      feel the coils **and** the crane servo (it holds 1 kg on the arm the whole time).
+- [x] **Only one magnet now (team decision 28/9, reverted from the two-magnet array) - code/docs
+      were still driving MAG1+MAG2 together, corrected.** Single magnet moved from pin 26 (CON74,
+      no PWM) to **pin 24 (CON72)**, PWM-capable. `config.h`: `PIN_MAGNET` (was `PIN_MAG1`/`PIN_MAG2`)
+      + placeholder `MAGNET_HOLD_PCT = 100`. `collection.cpp`: `analogWrite(MAGNET, ...)` in place of
+      the two `digitalWrite` calls - same on/off behaviour today, PWM ready for the hold test.
+      **Physically move the magnet wire from CON74 to CON72 before this is flashed to the real robot.**
+      `nav` and `servotest` both build clean against the change.
+- [x] **PWM hold test: done, 50% duty holds through a shake.** `MAGNET_HOLD_PCT = 50` in `config.h`.
+      `magnettest` bench rig (`src/magnet_test.cpp`) retired now that it's served its purpose.
+- [x] **"Pick up and hold" crane cycle for the 3rd target - implemented 28/9.** New
+      `COLLECTION_HOLD` state in `collection.cpp`: on the pickup that would make `targetsOnBoard()`
+      reach `MAX_TARGETS_ON_BOARD`, `navigation.cpp` calls `collection_start(true)` instead of
+      `collection_start()`. The arm eases to rest with the magnet still at full power (so the swing
+      doesn't drop it), then once parked the magnet drops to `MAGNET_HOLD_PCT` and **stays there
+      indefinitely** - nothing in the codebase turns it off again after that (not at round end, not
+      elsewhere in the FSM), only a power cycle drops it, per the team's requirement. `pickupIsThird`
+      in `navigation.cpp` is decided once at `startPickup()` and held through MISS retries so a retry
+      doesn't re-evaluate mid-cycle. This DOES touch `collection.cpp` (partner's file) - flagged here,
+      kept small (one new state, no changes to the existing PICKUP/DROP/FINISHED states), partner
+      should review before it's trusted on a real round.
+- [x] **3rd-target hold confirmed on the bench (28/9), `pickuptest` env retired.** 1st/2nd weights
+      triggered a normal pickup (swing to drop); the 3rd correctly parked at rest with the magnet
+      held at `MAGNET_HOLD_PCT` instead of dropping, and further weights presented afterward were
+      ignored (cap respected). `src/pickup_hold_test.cpp` removed now that it's served its purpose.
+      Still outstanding: confirming the hold survives an actual `roundOver()` transition and a real
+      MISS-then-retry on the 3rd, in a full round context rather than this isolated bench test.
 
 ## 3. On the floor  (printed parts installed first)
-- [ ] Obstacle avoidance on its own. `x` kills the motors.
-  - [x] Tall-box run 28/9 (`docs/testdata/2026-09-28_nav_tallbox_test2.log`, 20 s, IMU working):
-        avoided the box (TURN_R at 24/27 cm, closest ~17 cm, no contact), hold steered against
-        the right drift, then held ~89 deg after the turn. Got out of a corner but slowly.
-  - [~] *(coded 28/9, test on the floor)* **Corner handling:** TURN_L went straight into TURN_R (flip-flop), then a 2.2 s spin with
-        the 8x8 at 3-8 cm. Commit to one turn direction in corners / go to ESCAPE sooner.
-  - [~] *(coded 28/9, test on the floor)* **False weight detections near walls/corners:** several APPROACH entries with no weight
-        (bottom ToFs see the wall base at an angle, 8x8 band doesn't match on that side). Tune
-        weight_detect (margin / require the candidate to persist / ignore when a wall is close).
-  - [~] *(coded 28/9, test on the floor)* **SCAN started with a wall 30 cm away** (6.1 s): only allow SCAN with clear space around.
-  - [~] *(coded 28/9 - turned out to be the main false-weight fix, test on the floor)* **APPROACH "no progress" exit.** APPROACH only ends when the
-        weight gets closer / disappears or a wall appears on the 8x8. If the robot can't close in
-        (track stuck on a bump or ramp edge, wedged on something below the 8x8 rows, pushed by the
-        other robot, weight tight against a wall base) it would stay in APPROACH for the rest of the
-        round. Exit + suppress the target when the weight distance hasn't dropped for ~2 s or
-        `odomStalled()`. (Not a bug seen so far: staying in APPROACH on blocks 28/9 was expected -
-        the robot can't move there, and the detection was a real weight on its right.) Check on
-        the floor whether it ever triggers.
-- [ ] **Ground clearance (28/9):** the front end can't get over the home base's ~10 mm rim yet ->
-      filing one end down. Until then, floor tests start OUTSIDE the base. Once filed, check:
-      over the base rim **both ways** (leaving at the start, re-entering to deliver), a **25 mm speed
-      bump**, and a **100 mm / 30 % ramp** - the arena has all three.
-- [ ] **Test in the actual arena where possible:** black floor/walls change what the bottom ToFs, the
-      8x8 floor rows (r5-r7 set on a lighter floor) and the side IR see. Re-run `g` there first.
+**Team decision 28/9: obstacle avoidance is good.** Floor testing now focuses on collecting
+weights, not further avoidance tuning. `x` kills the motors.
+- [x] Obstacle avoidance: tall-box run, corner handling, false weight detections near
+      walls/corners, SCAN-near-wall, APPROACH "no progress" exit - all confirmed good.
+- [ ] **Approach + pickup on a single weight** - the main next test.
+- [ ] **Ground clearance - filing scheduled tonight (28/9).** Only blocks base-rim-dependent
+      tests (homing/delivery: crossing the rim both ways, the 25 mm speed bump, the 100 mm/30%
+      ramp). Everything else in this section - approach/pickup, REJECT, CREEP, arena sensor check,
+      side IR, speed ramp-up - can be tested now, filed or not.
 - [ ] **Pickup push-out check (arena):** every PICKUP event line now says `metal left at X.XX s`
       (data only). Real lifts on blocks 28/9 lost the metal ~1.2 s in (the lift). A weight pushed
       out by the arm would leave earlier and still be counted as collected (false `onb` -> the
       3-target cap stops collecting early). From the arena logs: if push-outs happen, add the
       crane "lift started" check (option 3: small getter in collection.cpp, partner's OK) and
       only count a pickup if metal was still there when the lift began.
-- [ ] **Floor test of the 28/9 behaviour fixes** (re-run the tall-box / corner setup, log it):
-      8x8 "0 = too close" latch (`X8_CLOSE_LATCH_MM`/`X8_ZERO_HOLD_MS`), corner turn-commit + turns only
-      end when the other side isn't close, SCAN only with >60 cm clear both sides (`SCAN_CLEAR_MM`),
-      APPROACH progress check (>=30 mm closer per 1 s, not stalled; `abd` telemetry column counts
-      give-ups), weight candidates 250 ms / <=500 mm. Tune those values from the log.
-- [ ] **Raise `DRIVE_SCALE_PCT` back to 100** (`config.h`, currently 50 = half the usable pulse
-      range, a safety limiter for first floor tests). Once avoidance behaves, step 50 → 75 → 100 and
-      retest avoidance at each step: stopping distance grows with speed, so the 8×8 thresholds may
-      need lengthening. Time 1 m at 50 and at 100 for the report's speed figure.
 - [ ] **Does the V-notch swing actually clear a rejected object?** (REJECT = reverse ~10 cm, pivot,
       ignore the spot 4 s.) The team isn't convinced it works, so test it with a plastic dummy and a
       knocked-over weight. Tune `REJECT_REVERSE_MS` / pivot time / `REJECT_SUPPRESS_MS`. If objects
@@ -160,8 +179,13 @@ Flash `nav`, robot on blocks, say go before pressing GO. 🤖 logs each one.
       reaches the inductive sensor before REJECT fires. (Blocks 28/9: a steel weight a few mm outside
       inductive range, ~13-17 cm ahead on the bottom ToFs, was REJECTed as "no metal" - on blocks the
       creep can't push it in. Check on the floor that real weights never get rejected.)
-- [ ] Approach + pickup on a single weight.
+- [ ] **Test in the actual arena where possible:** black floor/walls change what the bottom ToFs, the
+      8x8 floor rows (r5-r7 set on a lighter floor) and the side IR see. Re-run `g` there first.
 - [ ] Tune `SIDE_NEAR_MM` (side IR, currently 150) against a red wall.
+- [ ] **Raise `DRIVE_SCALE_PCT` back to 100** (`config.h`, currently 50 = half the usable pulse
+      range, a safety limiter for first floor tests). Step 50 → 75 → 100 and retest at each step:
+      stopping distance grows with speed, so the 8×8 thresholds may need lengthening. Time 1 m at
+      50 and at 100 for the report's speed figure.
 - [ ] Paste the telemetry into a spreadsheet for report data: sorting/collection accuracy, speed,
       avoidance success rate.
 
@@ -174,7 +198,13 @@ Flash `nav`, robot on blocks, say go before pressing GO. 🤖 logs each one.
 - [x] (done, wired) Wire the **GO button** (e.g. A0Z, CON68) and set `PIN_GO`.
 - [ ] Write homing + delivery (IMU fitted 27/9, heading + encoder distance ready). Then turn on
       `USE_HOMING`.
-- [ ] Gate/flap sorting logic: keep metal, drop dummies.
+- [ ] **Integrate the gate (rear flap) with the rest of the system.** `gate_init()`/`gate_update()`
+      run in `nav_main.cpp` (Herkulex on Serial2/CON66), but nothing ever commands it to open -
+      `gate_move_test()` exists but isn't called from navigation. It's release-only (open at the
+      home base to drop targets; dummies are rejected before pickup at the notch, not sorted here -
+      see CLAUDE.md), so it's gated on homing/delivery existing. Also **possibly redo/reprint** the
+      gate/flap mechanism itself - check with the team whether the current print still fits/works
+      before wiring it in.
 - [ ] **Drive encoders (27/9)**: `odometry.cpp` + `enctest` env.
   - [x] Wired: Encoder IO board on **CON55 (D2–D5)**, L A/B = 2/3, R A/B = 4/5 (one board, both motors).
         Found + fixed on the way: motor channel 1 was driving the RIGHT track (leads swapped at the

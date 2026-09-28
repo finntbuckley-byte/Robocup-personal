@@ -1,8 +1,8 @@
 /* ============================================================================
- *  encoder_test.cpp  -  drive-encoder bring-up + calibration (enctest env)
+ *  encoder_test.cpp  -  drive-encoder + heading-hold PID calibration (enctest env)
  *
  *      pio run -e enctest -t upload
- *      pio device monitor -b 115200        ('?' for the menu)
+ *      pio device monitor -b 115200        ('?' for the menu, type a line + Enter)
  *
  *  1. Robot on blocks: 'l' drives ONLY the left motor forward, 'r' ONLY the
  *     right. Only that motor's count should move, and it should go UP.
@@ -17,7 +17,20 @@
  *
  *  3. Heading hold: 'H' toggles it (default ON, needs the IMU). Stored runs
  *     record hold on/off and the IMU heading at the end (+ = turned right),
- *     so hold-off vs hold-on runs compare directly.
+ *     so hold-off vs hold-on runs compare directly. 'T' prints a per-run
+ *     trace (heading / steer / integral every 100 ms) for judging weave vs
+ *     steady-state offset vs slow-to-settle.
+ *
+ *  4. PID tuning, live (no reflash): "kp <v>" "ki <v>" "kd <v>" "imax <v>"
+ *     "maxsteer <v>" set gains for the NEXT run (headingTuning() in imu.h/.cpp
+ *     - the same struct nav's build would use if it ever called the setter,
+ *     which it doesn't, so this never affects the real robot). 's' prints the
+ *     current gains AND the steady 'integral' from the last run, paste-ready
+ *     for config.h (HEADING_KP/KI/KD/I_MAX/MAX_STEER/I_START). Recommended
+ *     order: tune kp alone (ki=kd=0) for the largest gain that doesn't weave,
+ *     add kd to damp any overshoot, add ki last to kill the remaining
+ *     steady-state drift, then read the settled integral off 'T' into
+ *     HEADING_I_START so rounds start already compensated.
  *
  *  Motors go through drive() so the trims, soft start and DRIVE_SCALE_PCT
  *  all apply, same as the nav build. Results live in RAM: they survive
@@ -114,11 +127,13 @@ static void printHelp()
   Serial.println(" z      zero both counts");
   Serial.println(" f / b  drive both forward / reverse (6 s max)");
   Serial.println(" l / r  drive ONLY the left / right motor forward (on blocks)");
-  Serial.println(" s      stop (any other key also stops)");
+  Serial.println(" any unrecognised key stops a run/countdown in progress");
   Serial.println(" + / -  test speed +/-10 %");
   Serial.println(" p      print counts once");
   Serial.println(" H      heading hold on/off (IMU) - stored with each run");
   Serial.println(" R      reset the hold's learned integral     T  print run traces");
+  Serial.println(" kp <v>  ki <v>  kd <v>  imax <v>  maxsteer <v>   set live (next run)");
+  Serial.println(" s      show current PID gains, paste-ready for config.h");
   Serial.print  (" speed "); Serial.print(testPct);
   Serial.print  ("%  (x DRIVE_SCALE_PCT "); Serial.print(DRIVE_SCALE_PCT); Serial.println("%)");
   Serial.print  (" timed run "); Serial.print(timedMs); Serial.println(" ms");
@@ -128,6 +143,20 @@ static void printHelp()
   Serial.print  (" ENC_COUNTS_PER_M = "); Serial.println(ENC_COUNTS_PER_M);
   Serial.println("===========================");
   Serial.println("ms\tcmdL\tcmdR\tcntL\tcntR\tmmL\tmmR\tmmAvg\tcpsL\tcpsR");
+}
+
+static void printSettings()
+{
+  HeadingTuning &t = headingTuning();
+  Serial.println("\n--- paste into include/config.h ---");
+  Serial.print("const float HEADING_KP        = "); Serial.print(t.kp, 2);  Serial.println("f;");
+  Serial.print("const float HEADING_KI        = "); Serial.print(t.ki, 2);  Serial.println("f;");
+  Serial.print("const float HEADING_KD        = "); Serial.print(t.kd, 2);  Serial.println("f;");
+  Serial.print("const float HEADING_I_MAX     = "); Serial.print(t.iMax, 1); Serial.println("f;");
+  Serial.print("const int   HEADING_MAX_STEER = "); Serial.println(t.maxSteer);
+  Serial.print("const float HEADING_I_START   = "); Serial.print(t.iStart, 1); Serial.println("f;");
+  Serial.print("(current learned integral = "); Serial.print(headingHoldIntegral(), 1);
+  Serial.println(" - once a run's 'T' trace shows this settled/steady, that's a HEADING_I_START candidate)");
 }
 
 static void printRow()
@@ -254,36 +283,65 @@ void setup()
   printHelp();
 }
 
+// Multi-char commands ("kp 2.5") for live PID tuning, plus every legacy
+// single-char command unchanged. One line in, so "kp 2.5\n" isn't split
+// across two reads the way single-char parsing would mangle it.
+static void handleLine(String line)
+{
+  line.trim();
+  if (line.length() == 0) return;
+
+  int sp = line.indexOf(' ');
+  String key = sp < 0 ? line : line.substring(0, sp);
+  String arg = sp < 0 ? "" : line.substring(sp + 1);
+  String keyLower = key; keyLower.toLowerCase();
+
+  if (keyLower == "kp" && arg.length())
+  { headingTuning().kp = arg.toFloat(); Serial.print("kp = "); Serial.println(headingTuning().kp, 2); return; }
+  if (keyLower == "ki" && arg.length())
+  { headingTuning().ki = arg.toFloat(); Serial.print("ki = "); Serial.println(headingTuning().ki, 2); return; }
+  if (keyLower == "kd" && arg.length())
+  { headingTuning().kd = arg.toFloat(); Serial.print("kd = "); Serial.println(headingTuning().kd, 2); return; }
+  if (keyLower == "imax" && arg.length())
+  { headingTuning().iMax = arg.toFloat(); Serial.print("imax = "); Serial.println(headingTuning().iMax, 1); return; }
+  if (keyLower == "maxsteer" && arg.length())
+  { headingTuning().maxSteer = arg.toInt(); Serial.print("maxsteer = "); Serial.println(headingTuning().maxSteer); return; }
+  if (keyLower == "s") { printSettings(); return; }
+
+  if (line.length() == 1)
+  {
+    switch (line[0])
+    {
+      case '?': printHelp(); return;
+      case 'z': encL.write(0); encR.write(0); Serial.println("zeroed"); return;
+      case 'f': startRun(+1, +1, ENCTEST_MAX_RUN_MS); return;
+      case 'b': startRun(-1, -1, ENCTEST_MAX_RUN_MS); return;
+      case 'l': startRun(+1,  0, ENCTEST_MAX_RUN_MS); return;
+      case 'r': startRun( 0, +1, ENCTEST_MAX_RUN_MS); return;
+      case 'g': startTimed(+1); return;
+      case 'h': startTimed(-1); return;
+      case '[': timedMs = max(timedMs - 250, 250UL); Serial.print("timed run "); Serial.println(timedMs); return;
+      case ']': timedMs = min(timedMs + 250, ENCTEST_MAX_RUN_MS); Serial.print("timed run "); Serial.println(timedMs); return;
+      case '+': testPct = min(testPct + 10, 100); Serial.print("speed "); Serial.println(testPct); return;
+      case '-': testPct = max(testPct - 10, 10);  Serial.print("speed "); Serial.println(testPct); return;
+      case 'p': printRow(); return;
+      case 'L': listResults(); return;
+      case 'C': nResults = 0; Serial.println("stored runs cleared"); return;
+      case 'H': holdOn = !holdOn; Serial.print("heading hold "); Serial.println(holdOn ? "ON" : "off"); return;
+      case 'R': headingHoldReset(); Serial.println("hold integral reset"); return;
+      case 'T': printTraces(); return;
+      default: break;
+    }
+  }
+
+  // anything unrecognised stops a run/countdown in progress
+  if (runL || runR || goCountdownAt) cancelTimed("key");
+}
+
 void loop()
 {
   if (Serial.available())
-  {
-    char c = Serial.read();
-    while (Serial.available()) Serial.read();
-    switch (c)
-    {
-      case '?': printHelp(); break;
-      case 'z': encL.write(0); encR.write(0); Serial.println("zeroed"); break;
-      case 'f': startRun(+1, +1, ENCTEST_MAX_RUN_MS); break;
-      case 'b': startRun(-1, -1, ENCTEST_MAX_RUN_MS); break;
-      case 'l': startRun(+1,  0, ENCTEST_MAX_RUN_MS); break;
-      case 'r': startRun( 0, +1, ENCTEST_MAX_RUN_MS); break;
-      case 'g': startTimed(+1); break;
-      case 'h': startTimed(-1); break;
-      case '[': timedMs = max(timedMs - 250, 250UL); Serial.print("timed run "); Serial.println(timedMs); break;
-      case ']': timedMs = min(timedMs + 250, ENCTEST_MAX_RUN_MS); Serial.print("timed run "); Serial.println(timedMs); break;
-      case '+': testPct = min(testPct + 10, 100); Serial.print("speed "); Serial.println(testPct); break;
-      case '-': testPct = max(testPct - 10, 10);  Serial.print("speed "); Serial.println(testPct); break;
-      case 'p': printRow(); break;
-      case 'L': listResults(); break;
-      case 'C': nResults = 0; Serial.println("stored runs cleared"); break;
-      case 'H': holdOn = !holdOn; Serial.print("heading hold "); Serial.println(holdOn ? "ON" : "off"); break;
-      case 'R': headingHoldReset(); Serial.println("hold integral reset"); break;
-      case 'T': printTraces(); break;
-      case '\n': case '\r': break;
-      default: if (runL || runR || goCountdownAt) cancelTimed("key"); break;
-    }
-  }
+    handleLine(Serial.readStringUntil('\n'));
 
   // GO: start a countdown, or cancel whatever is in progress
   if (goPressedOnce())

@@ -200,6 +200,31 @@ const int SIDE_NUDGE_PCT = 15;
 // ---------------------------------------------------------------------------
 const int FUNNEL_MIN_MM     = 20;   // below this = sensor noise / blind zone
 const int FUNNEL_PRESENT_MM = 66;
+// Back away if the notch ToF sees an object very close. Trigger is an inclusive
+// distance band; re-arm only after the reading clears this hysteresis distance.
+// A weight sliding in toward pickup passes through this same band while still
+// closing, so a snapshot distance check can't tell it apart from a dummy sitting
+// still - it must also be SETTLED (not still getting closer) before judging.
+// TODO(verify): widened from 30-50/clear 60 on 2026-09-28 bench findings (real
+// approaches read up to ~70mm); retune settle tolerance/time on the bench.
+const int UPRIGHT_BACKAWAY_MIN_MM = 30;
+const int UPRIGHT_BACKAWAY_MAX_MM = 80;
+const int UPRIGHT_BACKAWAY_CLEAR_MM = 90;
+const int UPRIGHT_BACKAWAY_SETTLE_TOL_MM = 4;      // max drift from the settle-window anchor to still count as "settled"
+// TODO(verify): 400ms halves the prior 800ms bench value (2026-09-28) now that
+// the settle check is anchor/window-based, not frame-to-frame - the anchor
+// approach only needs (approach speed x window) to exceed SETTLE_TOL_MM to
+// keep rejecting a moving weight, and the bench-observed slow creep (~30-40
+// mm/s) clears that at well under 400ms. Retest against the slowest deliberate
+// placement speed before going lower.
+const unsigned long UPRIGHT_BACKAWAY_SETTLE_MS = 800;   // must stay settled this long before judging
+const unsigned long UPRIGHT_BACKAWAY_CONFIRM_MS = 100;  // extra debounce once settled+no-metal is seen
+// The distance settle check and the inductive reading are debounced separately:
+// a single noisy LOW sample from the inductive sensor must not veto a weight
+// that has otherwise read metal steadily (bench-confirmed 2026-09-28: a settled
+// steel weight reading metal=1 for >1s still fired a false back-away on one
+// stray 0 sample without this).
+const unsigned long UPRIGHT_BACKAWAY_METAL_ABSENT_MS = 150;
 
 // ---------------------------------------------------------------------------
 // INDUCTIVE SENSOR  -  metal (real weight) vs non-metal (dummy) at the
@@ -449,20 +474,25 @@ const unsigned long TARGET_SUPPRESS_MS = 1500;
 // All six can be changed live on the bench: pio run -e servotest (see
 // servo_test.cpp), then paste the printed values back here.
 // ---------------------------------------------------------------------------
-const int   CRANE_PICKUP_ANGLE = 118;   // confirmed with a weight 2026-09-25 (less stall than 120, which is the fallback)
+const int   CRANE_PICKUP_ANGLE = 122;   // confirmed with a weight 2026-09-25 (less stall than 120, which is the fallback)
 const float CRANE_PICKUP_DPS   = 45.0f;
 const int   CRANE_DROP_ANGLE   = 40;
 const float CRANE_DROP_DPS     = 60.0f;
-const int   CRANE_REST_ANGLE   = 70;     // rest angle + speed confirmed by the partner 2026-09-25
+const int   CRANE_REST_ANGLE   = 70;     // rest angle + speed cotrnfirmed by the partner 2026-09-25
 const float CRANE_REST_DPS     = 100.0f;
 
 // Crane pins (used by collection.cpp).
 const int PIN_CRANE_SERVO = 28;   // CON67
-// Electromagnets via the FET board. 26/27 (CON74/75) have NO PWM on the
-// Teensy 4.0. Planned move to 24/25 (CON72/73) for a PWM holding level - see
-// BENCH_TODO.md 2d. Change these two lines when the wires move.
-const int PIN_MAG1 = 26;          // CON74
-const int PIN_MAG2 = 27;          // CON75
+// Single electromagnet via the FET board (reverted from the two-magnet array
+// - team decision, 2026-09-28; CLAUDE.md corrected to match). Moved from
+// CON74 (pin 26, no PWM on the Teensy 4.0) to CON72 (pin 24, PWM-capable) so
+// a reduced holding level can be used for the 3rd carried target - see
+// BENCH_TODO.md 2d. Pin 24 doubles as Wire2's SCL2, unused elsewhere.
+const int PIN_MAGNET = 24;        // CON72
+// Confirmed by bench shake test (magnettest env, 2026-09-28): 50% duty held
+// through a shake. Used to carry the 3rd target on the arm at rest instead of
+// dropping it into storage - see COLLECTION_HOLD in collection.cpp.
+const int MAGNET_HOLD_PCT = 60;   // % duty while carrying the 3rd target
 
 // eased servo moves (smooth_servo.cpp) - used by the crane
 const unsigned long SERVO_MIN_MOVE_MS     = 150;  // floor for tiny moves

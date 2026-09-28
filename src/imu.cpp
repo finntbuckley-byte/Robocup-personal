@@ -117,10 +117,14 @@ float imuHeadingDeg()   { return ok ? wrap180(IMU_HEADING_SIGN * (rawDeg - zeroD
 float imuRateDps()      { return ok ? rateDps : 0.0f; }
 uint8_t imuGyroCal()    { return gyroCal; }
 
+static HeadingTuning tuning = { HEADING_KP, HEADING_KI, HEADING_KD,
+                                 HEADING_I_MAX, HEADING_I_START, HEADING_MAX_STEER };
+HeadingTuning &headingTuning() { return tuning; }
+
 static float integ = HEADING_I_START; // % of steer from the I term
 static unsigned long lastHoldMs = 0;
 
-void headingHoldReset() { integ = HEADING_I_START; lastHoldMs = 0; }
+void headingHoldReset() { integ = tuning.iStart; lastHoldMs = 0; }
 float headingHoldIntegral() { return integ; }
 
 // PID on heading error, the D from the gyro rate (no noisy differentiation).
@@ -133,14 +137,14 @@ int headingHoldSteer(float targetDeg)
   unsigned long now = millis();
   if (lastHoldMs != 0 && now - lastHoldMs <= 100)
   {
-    integ += HEADING_KI * err * (now - lastHoldMs) / 1000.0f;
-    if (integ >  HEADING_I_MAX) integ =  HEADING_I_MAX;
-    if (integ < -HEADING_I_MAX) integ = -HEADING_I_MAX;
+    integ += tuning.ki * err * (now - lastHoldMs) / 1000.0f;
+    if (integ >  tuning.iMax) integ =  tuning.iMax;
+    if (integ < -tuning.iMax) integ = -tuning.iMax;
   }
   lastHoldMs = now;
 
-  float s = HEADING_KP * err + integ - HEADING_KD * rateDps;
-  if (s >  HEADING_MAX_STEER) s =  HEADING_MAX_STEER;
-  if (s < -HEADING_MAX_STEER) s = -HEADING_MAX_STEER;
+  float s = tuning.kp * err + integ - tuning.kd * rateDps;
+  if (s >  tuning.maxSteer) s =  tuning.maxSteer;
+  if (s < -tuning.maxSteer) s = -tuning.maxSteer;
   return (int)(s >= 0 ? s + 0.5f : s - 0.5f);
 }

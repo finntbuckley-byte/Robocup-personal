@@ -70,6 +70,7 @@ const int MODE_REPOSITION = 6;
 const int MODE_SCAN       = 7;
 const int MODE_CREEP      = 8;
 const int MODE_REJECT     = 9;
+const int MODE_BACK_AWAY  = 10;
 
 static int mode = MODE_FORWARD;
 static unsigned long modeStart = 0;
@@ -85,12 +86,15 @@ static float approachErrPrev = 0;
 static int scanDir = 1;
 static int repositionDir = 1;
 static bool pickupStarted = false;
+static bool pickupIsThird = false;    // decided once at startPickup(), held through retries
 static int  pickupTries = 0;
 static uint16_t lastWeightDist = 0;   // last distance the bottom pair saw the candidate at
 static int  lastWeightSide = 0;
 static int  rejectDir = 1;
 static int  rejectCount = 0;
 static unsigned long metalSince = 0;
+static unsigned long uprightNearSince = 0;
+static bool uprightBackawayLatched = false;
 
 static void setMode(int m) { mode = m; modeStart = millis(); }
 
@@ -122,6 +126,45 @@ static bool metalConfirmed()
   return millis() - metalSince >= INDUCTIVE_CONFIRM_MS;
 }
 
+static int roomierSide();
+
+// A close, fresh notch-ToF return only requests a back-away when the inductive
+// sensor does not detect metal. This catches close plastic/lying objects while
+// preserving the correctly seated steel-weight pickup path. Hysteresis prevents
+// retriggering until the object has moved clear.
+static bool uprightBackawayConfirmed()
+{
+  if (!tofOk(TOF_UPRIGHT)) { uprightNearSince = 0; return false; }
+
+  if (tofUpright >= UPRIGHT_BACKAWAY_CLEAR_MM)
+  {
+    uprightBackawayLatched = false;
+    uprightNearSince = 0;
+    return false;
+  }
+
+  bool inBand = tofUpright >= UPRIGHT_BACKAWAY_MIN_MM &&
+                tofUpright <= UPRIGHT_BACKAWAY_MAX_MM;
+  if (!inBand || uprightBackawayLatched)
+  {
+    uprightNearSince = 0;
+    return false;
+  }
+
+  if (uprightNearSince == 0) uprightNearSince = millis();
+  return millis() - uprightNearSince >= UPRIGHT_BACKAWAY_CONFIRM_MS;
+}
+
+static void startUprightBackAway()
+{
+  uprightBackawayLatched = true;
+  uprightNearSince = 0;
+  repositionDir = x8Fresh() ? roomierSide() : -1;
+  Serial.print(">>> NOTCH OBJECT WITHOUT INDUCTIVE METAL: "); Serial.print(tofUpright);
+  Serial.println(" mm - backing away and turning");
+  setMode(MODE_BACK_AWAY);
+}
+
 int rejectedCount() { return rejectCount; }
 
 const char* modeName()
@@ -137,6 +180,7 @@ const char* modeName()
     case MODE_REPOSITION: return "REPOSITION";
     case MODE_CREEP:      return "CREEP";
     case MODE_REJECT:     return "REJECT";
+    case MODE_BACK_AWAY:  return "BACK_AWAY";
     default:              return "SCAN";
   }
 }
@@ -226,6 +270,9 @@ static void startPickup()
 {
   repositionDir = (lastWeightSide < 0) ? +1 : -1;   // peel away from its side
   pickupStarted = false;
+  // decided once, before the crane moves, so a MISS retry doesn't re-check
+  // targetsOnBoard() mid-cycle and flip which behaviour this pickup uses
+  pickupIsThird = targetsOnBoard() >= MAX_TARGETS_ON_BOARD - 1;
   setMode(MODE_PICKUP);
 }
 
@@ -279,6 +326,7 @@ void navigationUpdate()
     {
       // a weight can end up in the notch without an approach (drove into it)
       if (wantWeights && metalConfirmed()) { pickupTries = 0; lastWeightSide = 0; startPickup(); }
+      else if (!inductiveMetalNow() && uprightBackawayConfirmed()) startUprightBackAway();
       else if (obstacleLeft() && obstacleRight())
       {
         escapeSpinDir = roomierSide();
@@ -342,6 +390,10 @@ void navigationUpdate()
       }
       break;
 
+    case MODE_BACK_AWAY:
+      if (held >= REJECT_REVERSE_MS + REPOSITION_TURN_MS) setMode(MODE_FORWARD);
+      break;
+
     case MODE_SCAN:
       if (wantWeights && metalConfirmed()) { pickupTries = 0; lastWeightSide = 0; startPickup(); }
       else if (wantWeights && weightFound) startApproach();
@@ -358,6 +410,7 @@ void navigationUpdate()
       if (!wantWeights) { setMode(MODE_FORWARD); break; }
 
       if (metalConfirmed()) { pickupTries = 0; startPickup(); break; }
+      if (!inductiveMetalNow() && uprightBackawayConfirmed()) { startUprightBackAway(); break; }
 
       if (odomStalled() && held > APPROACH_PROGRESS_MS) { abandonApproach("tracks stalled"); break; }
 
@@ -392,6 +445,7 @@ void navigationUpdate()
       if (avoidIfBlocked()) break;
       if (!wantWeights) { setMode(MODE_FORWARD); break; }
       if (metalConfirmed()) { pickupTries = 0; startPickup(); }
+      else if (!inductiveMetalNow() && uprightBackawayConfirmed()) startUprightBackAway();
       else if (weightFound && weightDistMM >= CREEP_START_MM) startApproach();   // re-acquired further out
       else if (held > CREEP_MAX_MS) startReject();
       break;
@@ -399,7 +453,7 @@ void navigationUpdate()
     case MODE_PICKUP:
       if (!pickupStarted)
       {
-        collection_start();      // partner's crane/magnet FSM
+        collection_start(pickupIsThird);      // partner's crane/magnet FSM
         pickupStarted = true;
         pickupTries++;
         pickupCycleStart = millis();
@@ -538,6 +592,13 @@ void navigationUpdate()
         drive(-REJECT_REVERSE_PCT, -REJECT_REVERSE_PCT);
       else
         drive(rejectDir * REPOSITION_SPEED_PCT, -rejectDir * REPOSITION_SPEED_PCT);
+      break;
+
+    case MODE_BACK_AWAY:
+      if (held < REJECT_REVERSE_MS)
+        drive(-REJECT_REVERSE_PCT, -REJECT_REVERSE_PCT);
+      else
+        drive(repositionDir * REPOSITION_SPEED_PCT, -repositionDir * REPOSITION_SPEED_PCT);
       break;
 
     case MODE_REPOSITION:
