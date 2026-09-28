@@ -139,7 +139,7 @@ static bool telemetryOn = true;
 
 static void printTelemetryHeader()
 {
-  Serial.println("ms\tround\tmode\tBL\tBR\tUP\tTOP\tREAR\tX8L\tX8R\tIRL\tIRR\tfun\tind\tW\tpicks\treal\tdummy\tonb\trej\tabd\tdrvL\tdrvR\todo\todoRaw\tslip\tstall\thdg\tpx\tpy\timuMode\timuRst\ttofRec\tgoD\tgoA");
+  Serial.println("ms\tround\tmode\tBL\tBR\tUP\tTOP\tTOPok\tREAR\tX8L\tX8R\tIRL\tIRR\tfun\tind\tW\tpicks\treal\tdummy\tonb\trej\tabd\tdrvL\tdrvR\todo\todoRaw\tslip\tstall\thdg\tpx\tpy\timuMode\timuRst\ttofRec\tgoD\tgoA");
 }
 
 static void printTelemetry()
@@ -155,6 +155,7 @@ static void printTelemetry()
   Serial.print(tofBR);                  Serial.print('\t');
   Serial.print(tofUpright);             Serial.print('\t');
   Serial.print(tofTop);                 Serial.print('\t');
+  Serial.print(tofOk(TOF_TOP) ? 1 : 0); Serial.print('\t');   // 0 = sensor not up (unwired/failed/stale), not "nothing seen"
   Serial.print(tofRear);                Serial.print('\t');
   if (x8Fresh()) { Serial.print(x8LeftMM()); Serial.print('\t'); Serial.print(x8RightMM()); }
   else           { Serial.print("stale\tstale"); }
