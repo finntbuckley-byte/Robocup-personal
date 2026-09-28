@@ -164,6 +164,41 @@ guarded out - so re-enabling is a one-line flip once it's fixed.
       `USE_LYING_WEIGHT_REJECT` to 1, place a lying weight in the notch mid-round and confirm
       REJECT fires quickly; place a real upright weight and confirm it does NOT reject.
 
+## 2h. stack_test.cpp rework (SEARCH/CREEP/REVERSE + discrepancy confirm, 28/9)
+Reworked per the team's sensor-layout drawing (top plate 34mm, all ToFs 57mm up except the
+underside/notch ToF at 13mm and the inductive at 50mm). Key insight from the geometry: the notch
+ToF (13mm) crosses both an upright weight's body AND a lying weight's silhouette, so it can't
+discriminate alone - but the top ToF (57mm) only intersects an UPRIGHT weight's top 13mm, so it
+legitimately reads nothing for most of a real weight's creep-in. A short fixed timeout can't tell
+"still arriving" apart from "lying down" - only patience (does top EVER resolve as creep
+continues) can.
+
+New flow: `SEARCH` (drive + arc toward whichever outer weight-search ToF, L0X pair, sees
+something) -> `CREEP` (once the notch ToF sees something) -> confirm against the top ToF,
+patiently -> `REVERSE` (confirmed mismatch) or keep creeping. The **inductive sensor overrides
+everything, at any state** - the instant it reads metal, collection starts immediately regardless
+of what notch/top currently say. This is a bench rig only (robot off its tracks - drive commands
+are issued/logged but nothing moves; watch the state-transition prints and `drv_l`/`drv_r`
+telemetry instead of the tracks).
+- [ ] **None of the new constants are bench-tuned yet** - all in `config.h`'s STACK_TEST section,
+      flagged `TODO(verify)`: `STACK_SEARCH_MAX_MM`/`SPEED_PCT`/`ARC_PCT` (search behaviour),
+      `STACK_DISCREPANCY_MM` (secondary numeric signal), `STACK_MISMATCH_CONFIRM_MS` (the patience
+      window - currently 1500ms, a guess), `STACK_CREEP_MAX_MS` (hard fallback cap, 8000ms).
+- [ ] **Characterise the mismatch confirm window against real creep speed.** The whole point of
+      this rework is that the window needs to be at least as long as a real weight typically takes
+      to go from "notch first sees it" to "top first sees it" - measure that on the bench (time
+      the creep, or read it off telemetry timestamps) and set `STACK_MISMATCH_CONFIRM_MS` above
+      it, not by feel.
+- [ ] **Bench-test all four cases end-to-end through the new flow**, not just watching numbers:
+      place a real weight so it's found by search, drive/arc toward it (won't physically move, but
+      confirm the intended `drv_l`/`drv_r` values look right), let it reach the notch, confirm
+      CREEP holds until top resolves rather than rejecting early. Then a dummy (same, should also
+      hold). Then a lying weight (should confirm mismatch and reverse - time how long it actually
+      takes, and whether `STACK_MISMATCH_CONFIRM_MS` needs adjusting). Then present metal directly
+      at any point in any state and confirm the inductive override fires immediately regardless.
+- [ ] Confirm the two new outer weight-search ToFs (L0X, `STACK_XSHUT_SEARCH_L`/`_R`) actually come
+      up - this is new hardware bring-up for this file, not yet tested on any board.
+
 ## 2d. Third weight carried on the magnet (held at rest, not dropped)
 - [x] Magnet coils **do get hot** in extended use (partner, from earlier testing), so a full-power
       hold for ~100 s isn't safe. Plan: full power to grab, then a **reduced PWM holding level**.

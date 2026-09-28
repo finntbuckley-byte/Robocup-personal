@@ -1,19 +1,25 @@
-// stack_test.cpp - creep on GO until notch+top AGREE (small, consistent
-// |notch_mm - top_mm|) AND inductive reads metal, then stop and run the
-// crane. Bench data (28/9): upright real/dummy read both sensors in the
-// SAME ~60-110mm band, but that band overlaps a LYING weight's readings
-// (30-90 or 50-130 depending on which way it fell) too much to tell them
-// apart on absolute distance alone - the gap between the two sensors is
-// the actual signal (small+steady = upright, bigger = lying), so that's
-// what gates the pickup here. A confirmed, persistent MISMATCH aborts the
-// attempt outright rather than waiting for the creep timeout.
-// 115200 baud, TSV output.
-// Serial: x = stop now | r = re-arm | s = print bands
-//         a<mm> notch min | b<mm> notch max | c<mm> top min | d<mm> top max
-//         e<mm> max |notch-top| to count as agreement | f<ms> confirm time
+// stack_test.cpp - BENCH RIG (robot is off its tracks - drive commands are
+// issued and logged, but nothing will physically move; watch the state
+// prints and the drv_l/drv_r telemetry columns instead).
+//
+// SEARCH  drive forward, arc toward whichever outer weight-search ToF sees
+//         something within range. -> CREEP once the underside notch ToF
+//         sees something (entered its FoV).
+// CREEP   drive straight. Confirm against the top ToF (patiently - see
+//         config.h for why this can't be a short timeout): a confirmed
+//         MISMATCH -> REVERSE. Otherwise just keep creeping - there is no
+//         separate "matched, go pick it up" branch here.
+// (any state) INDUCTIVE OVERRIDE - the instant it reads metal, everything
+//         else is skipped and collection starts immediately.
+// REVERSE reverse + pivot, then back to SEARCH for the next candidate.
+//
+// Serial: x = stop now | r = re-arm (from WAIT/DONE) | s = print settings
+//         e<mm> max |notch-top| to still count as agreement (secondary signal)
+//         f<ms> mismatch confirm time | g<mm> search range
 // Standalone test module: does NOT touch tof.cpp / navigation.cpp.
 #include <Arduino.h>
 #include <Wire.h>
+#include <VL53L0X.h>
 #include <VL53L1X.h>
 #include "config.h"
 #include "motor.h"
@@ -33,28 +39,46 @@ static void hwPickupStart()       { collection_start(); }
 static bool hwPickupBusy()        { return collection_busy(); }
 // ---------------------------------------------------------------------------
 
-struct Tof {
+struct TofL1 {
   VL53L1X s;
   bool ok = false;
-  uint16_t mm = 0, raw = 0;
-  uint8_t st = 255;
+  uint16_t mm = 0;
   unsigned long lastMs = 0;
 };
-static Tof notch, top;
+struct TofL0 {
+  VL53L0X s;
+  bool ok = false;
+  uint16_t mm = 0;
+  unsigned long lastMs = 0;
+};
+static TofL1 notch, top;          // L1X pair - weight discrimination
+static TofL0 searchL, searchR;    // L0X pair - outer weight search
 
-enum State { ST_WAIT, ST_CREEP, ST_SETTLE, ST_PICKUP, ST_DONE };
+enum State { ST_WAIT, ST_SEARCH, ST_CREEP, ST_REVERSE, ST_SETTLE, ST_PICKUP, ST_DONE };
 static State state = ST_WAIT;
 static unsigned long stateMs = 0;
 
-// runtime-tunable bands (start from config.h)
-static int nLo = STACK_NOTCH_MIN_MM, nHi = STACK_NOTCH_MAX_MM;
-static int tLo = STACK_TOP_MIN_MM,   tHi = STACK_TOP_MAX_MM;
-static int dMax = STACK_DISCREPANCY_MM;
-static unsigned long matchMs = STACK_MATCH_CONFIRM_MS;
+// runtime-tunable (start from config.h) - see header comment for meaning
+static int dMax           = STACK_DISCREPANCY_MM;
+static unsigned long mismatchMs = STACK_MISMATCH_CONFIRM_MS;
+static int searchMaxMm    = STACK_SEARCH_MAX_MM;
+
+static const char* stateName(State s) {
+  switch (s) {
+    case ST_WAIT:    return "WAIT";
+    case ST_SEARCH:  return "SEARCH";
+    case ST_CREEP:   return "CREEP";
+    case ST_REVERSE: return "REVERSE";
+    case ST_SETTLE:  return "SETTLE";
+    case ST_PICKUP:  return "PICKUP";
+    default:         return "DONE";
+  }
+}
 
 static void setState(State s, const char *why) {
+  Serial.print(">>> "); Serial.print(stateName(state)); Serial.print(" -> "); Serial.print(stateName(s));
+  Serial.print("  ("); Serial.print(why); Serial.println(')');
   state = s; stateMs = millis();
-  Serial.print(">>> state "); Serial.print((int)s); Serial.print(' '); Serial.println(why);
 }
 
 // ---- SX1509 XSHUT + sensor bring-up (same approach as tof.cpp) -------------
@@ -64,7 +88,7 @@ static bool sxWrite(uint8_t reg, uint8_t val) {
   return SX_WIRE.endTransmission() == 0;
 }
 
-static bool bringUp(Tof &t, int xshut, uint8_t addr, uint8_t &mask, int roi) {
+static bool bringUpL1(TofL1 &t, int xshut, uint8_t addr, uint8_t &mask, int roi) {
   mask |= (1 << xshut);
   sxWrite(SX_REG_DATA_A, mask);
   delay(TOF_BOOT_MS);
@@ -85,20 +109,48 @@ static bool bringUp(Tof &t, int xshut, uint8_t addr, uint8_t &mask, int roi) {
   return true;
 }
 
-static void tofRead(Tof &t, unsigned long now) {
+static bool bringUpL0(TofL0 &t, int xshut, uint8_t addr, uint8_t &mask) {
+  mask |= (1 << xshut);
+  sxWrite(SX_REG_DATA_A, mask);
+  delay(TOF_BOOT_MS);
+  t.s = VL53L0X();
+  t.s.setBus(&TOF_WIRE);
+  t.s.setTimeout(100);
+  if (!t.s.init()) {
+    mask &= ~(1 << xshut);
+    sxWrite(SX_REG_DATA_A, mask);
+    return false;
+  }
+  t.s.setAddress(addr);
+  t.s.startContinuous(TOF_PERIOD_MS);
+  t.ok = true;
+  return true;
+}
+
+static const uint8_t L0X_REG_INTERRUPT_STATUS = 0x13;
+static const uint16_t TOF_NO_TARGET_MM = 8000;   // matches tof.cpp's convention
+
+static void tofReadL1(TofL1 &t, unsigned long now) {
   if (!t.ok) return;
   if (t.s.dataReady()) {
-    t.raw = t.s.read(false);
-    t.st  = t.s.ranging_data.range_status;
+    uint16_t mm = t.s.read(false);
+    bool valid = (t.s.ranging_data.range_status == VL53L1X::RangeValid) && mm <= TOF_MAX_VALID_MM;
+    t.mm = valid ? mm : 0;
     t.lastMs = now;
-    bool valid = (t.st == VL53L1X::RangeValid) && t.raw <= TOF_MAX_VALID_MM;
-    t.mm = valid ? t.raw : 0;
   }
   if (!t.lastMs || now - t.lastMs > TOF_STALE_MS) t.mm = 0;   // never act on a frozen value
 }
-static bool fresh(const Tof &t, unsigned long now) {
-  return t.ok && t.lastMs && now - t.lastMs <= TOF_STALE_MS;
+static void tofReadL0(TofL0 &t, unsigned long now) {
+  if (!t.ok) return;
+  if ((t.s.readReg(L0X_REG_INTERRUPT_STATUS) & 0x07) != 0) {
+    uint16_t mm = t.s.readRangeContinuousMillimeters();
+    t.mm = (mm >= TOF_NO_TARGET_MM) ? 0 : mm;
+    t.lastMs = now;
+  }
+  if (!t.lastMs || now - t.lastMs > TOF_STALE_MS) t.mm = 0;
 }
+static bool freshL1(const TofL1 &t, unsigned long now) { return t.ok && t.lastMs && now - t.lastMs <= TOF_STALE_MS; }
+static bool freshL0(const TofL0 &t, unsigned long now) { return t.ok && t.lastMs && now - t.lastMs <= TOF_STALE_MS; }
 
 // ---- inductive, debounced (metal must read steadily) -----------------------
 static bool inductiveMetal(unsigned long now) {
@@ -108,8 +160,6 @@ static bool inductiveMetal(unsigned long now) {
   if (!since) since = now;
   return now - since >= INDUCTIVE_CONFIRM_MS;
 }
-
-static bool inBand(uint16_t mm, int lo, int hi) { return lo > 0 && mm >= lo && mm <= hi; }
 
 // ---- GO button: arms only after being seen released (project rule) ---------
 static bool goEdge(unsigned long now) {
@@ -130,12 +180,9 @@ static bool goEdge(unsigned long now) {
   return false;
 }
 
-static void printBands() {
-  Serial.print("bands notch "); Serial.print(nLo); Serial.print('-'); Serial.print(nHi);
-  Serial.print("  top "); Serial.print(tLo); Serial.print('-'); Serial.println(tHi);
-  if (nLo <= 0 || tLo <= 0) Serial.println("!! bands unset - pickup can't fire; set with a/b/c/d");
-  Serial.print("discrepancy max "); Serial.print(dMax); Serial.print("mm, confirm ");
-  Serial.print(matchMs); Serial.println("ms (set with e/f)");
+static void printSettings() {
+  Serial.print("discrepancy max "); Serial.print(dMax); Serial.print("mm, mismatch confirm ");
+  Serial.print(mismatchMs); Serial.print("ms, search range "); Serial.print(searchMaxMm); Serial.println("mm");
 }
 
 static void handleSerial() {
@@ -150,12 +197,12 @@ static void handleSerial() {
     switch (buf[0]) {
       case 'r': setState(ST_WAIT, "re-armed"); break;
       case 's': break;
-      case 'a': nLo = v; break;  case 'b': nHi = v; break;
-      case 'c': tLo = v; break;  case 'd': tHi = v; break;
-      case 'e': dMax = v; break; case 'f': matchMs = v; break;
+      case 'e': dMax = v; break;
+      case 'f': mismatchMs = v; break;
+      case 'g': searchMaxMm = v; break;
       default: continue;
     }
-    printBands();
+    printSettings();
   }
 }
 
@@ -168,80 +215,114 @@ void setup() {
   pinMode(PIN_INDUCTIVE, INPUT);
   if (PIN_GO >= 0) pinMode(PIN_GO, INPUT);
 
-  // all XSHUT low first; the bottom pair and rear ToF stay in shutdown in this test
+  Serial.println("\n!! BENCH RIG - robot is off its tracks, it will NOT move.");
+  Serial.println("!! Drive commands are still issued/logged - watch drv_l/drv_r and the state prints.\n");
+
+  // all XSHUT low first; anything not brought up here stays in shutdown
   bool sx = sxWrite(SX_REG_DATA_A, 0x00) && sxWrite(SX_REG_DIR_A, 0x00);
   if (!sx) { Serial.println("!! SX1509 (0x3F) not found - check SX_WIRE and CON26 cable"); return; }
   uint8_t mask = 0;
   delay(10);
-  bool a = bringUp(notch, STACK_XSHUT_NOTCH, TOF_ADDRESS_START + 0, mask, 16);
-  bool b = bringUp(top,   STACK_XSHUT_TOP,   TOF_ADDRESS_START + 1, mask, STACK_TOP_ROI);
+  bool a = bringUpL1(notch,   STACK_XSHUT_NOTCH,    TOF_ADDRESS_START + 0, mask, 16);
+  bool b = bringUpL1(top,     STACK_XSHUT_TOP,      TOF_ADDRESS_START + 1, mask, STACK_TOP_ROI);
+  bool c = bringUpL0(searchL, STACK_XSHUT_SEARCH_L, TOF_ADDRESS_START + 2, mask);
+  bool d = bringUpL0(searchR, STACK_XSHUT_SEARCH_R, TOF_ADDRESS_START + 3, mask);
   Serial.println("BOOT");
-  Serial.print("notch (XSHUT"); Serial.print(STACK_XSHUT_NOTCH); Serial.println(a ? ") ok" : ") FAILED");
-  Serial.print("top   (XSHUT"); Serial.print(STACK_XSHUT_TOP);   Serial.println(b ? ") ok" : ") FAILED - is it an L1X?");
-  printBands();
-  Serial.println("ms\tstate\tnotch_mm\tnotch_raw\tnotch_st\ttop_mm\ttop_raw\ttop_st\tmetal\tnotch_in\ttop_in\tdiff\tmatch\tmismatch");
+  Serial.print("notch   (XSHUT"); Serial.print(STACK_XSHUT_NOTCH);    Serial.println(a ? ") ok" : ") FAILED - is it an L1X?");
+  Serial.print("top     (XSHUT"); Serial.print(STACK_XSHUT_TOP);     Serial.println(b ? ") ok" : ") FAILED - is it an L1X?");
+  Serial.print("searchL (XSHUT"); Serial.print(STACK_XSHUT_SEARCH_L); Serial.println(c ? ") ok" : ") FAILED - is it an L0X?");
+  Serial.print("searchR (XSHUT"); Serial.print(STACK_XSHUT_SEARCH_R); Serial.println(d ? ") ok" : ") FAILED - is it an L0X?");
+  printSettings();
+  Serial.println("ms\tstate\tnotch_mm\ttop_mm\tsL_mm\tsR_mm\tmetal\tdiff\tmismatch\tdrv_l\tdrv_r");
 }
 
 void loop() {
   unsigned long now = millis();
+  unsigned long held = now - stateMs;
   hwUpdate();
-  tofRead(notch, now);
-  tofRead(top, now);
+  tofReadL1(notch, now);
+  tofReadL1(top, now);
+  tofReadL0(searchL, now);
+  tofReadL0(searchR, now);
   handleSerial();
 
-  bool metal     = inductiveMetal(now);
-  bool notchIn   = inBand(notch.mm, nLo, nHi);   // informational only - see discrepancy check below
-  bool topIn     = inBand(top.mm, tLo, tHi);
-  bool bothFresh = fresh(notch, now) && fresh(top, now);
+  bool metal = inductiveMetal(now);
+  bool go    = goEdge(now);
 
-  // Both sensors must have an actual valid return (not "lost target", which
-  // reads mm=0) before a small gap between them means anything - otherwise
-  // two sensors both seeing nothing would look like a perfect "agreement".
-  bool bothValid = notch.mm > 0 && top.mm > 0;
-  int diff = bothValid ? (int)notch.mm - (int)top.mm : 999;
-  if (diff < 0) diff = -diff;
-  bool agree    = bothValid && diff <= dMax;
-  bool disagree = bothValid && diff >  dMax;
+  bool notchPresent = notch.mm > 0;
+  bool topPresent   = top.mm > 0;
+  int  diff = (notchPresent && topPresent) ? (int)notch.mm - (int)top.mm : -1;
+  if (diff < 0 && notchPresent && topPresent) diff = -diff;
 
-  // debounced BOTH ways - one noisy frame shouldn't trigger a pickup OR
-  // abort one; see config.h STACK_DISCREPANCY_MM/STACK_MATCH_CONFIRM_MS
-  static unsigned long agreeSince = 0, disagreeSince = 0;
-  if (agree)    { if (!agreeSince) agreeSince = now; }    else agreeSince = 0;
-  if (disagree) { if (!disagreeSince) disagreeSince = now; } else disagreeSince = 0;
-  bool matched          = agreeSince    && now - agreeSince    >= matchMs;
-  bool mismatchConfirmed = disagreeSince && now - disagreeSince >= matchMs;
+  // "mismatch" = notch sees something but top has NEVER confirmed (the real
+  // lying-weight signature - see config.h), OR both valid but far apart (a
+  // weaker secondary signal). Either resets the instant top produces ANY
+  // valid reading - that's active evidence the weight is still arriving.
+  bool mismatchNow = notchPresent && (!topPresent || diff > dMax);
+  static unsigned long mismatchSince = 0;
+  if (mismatchNow) { if (!mismatchSince) mismatchSince = now; }
+  else mismatchSince = 0;
+  bool mismatchConfirmed = mismatchSince && now - mismatchSince >= mismatchMs;
 
-  bool go = goEdge(now);
+  bool searchOk = freshL0(searchL, now) && freshL0(searchR, now);
+  bool creepOk  = freshL1(notch, now) && freshL1(top, now);
 
-  switch (state) {
+  // ---- top-level overrides, apply in every active state -------------------
+  if (go && GO_STOPS_ROUND && state != ST_WAIT && state != ST_DONE) {
+    hwStop(); setState(ST_DONE, "GO pressed again - stopped");
+  }
+  else if (metal && state != ST_WAIT && state != ST_DONE && state != ST_SETTLE && state != ST_PICKUP) {
+    hwSoftStop(); setState(ST_SETTLE, "INDUCTIVE OVERRIDE - metal detected, collection now");
+  }
+  else switch (state) {
     case ST_WAIT:
     case ST_DONE:
       if (go) {
-        if (!bothFresh) Serial.println("!! a ToF is stale/failed - not starting");
-        else setState(ST_CREEP, "GO");
+        if (!searchOk) Serial.println("!! a search ToF is stale/failed - not starting");
+        else setState(ST_SEARCH, "GO");
       }
       break;
 
+    case ST_SEARCH:
+    {
+      if (!searchOk) { hwStop(); setState(ST_DONE, "search ToF stale - stopped"); break; }
+      if (notchPresent) { setState(ST_CREEP, "weight entered notch FoV"); break; }
+
+      bool leftSees  = searchL.mm > 0 && searchL.mm < searchMaxMm;
+      bool rightSees = searchR.mm > 0 && searchR.mm < searchMaxMm;
+      int steer = 0;
+      if (leftSees && rightSees) steer = (searchL.mm < searchR.mm) ? -STACK_SEARCH_ARC_PCT : STACK_SEARCH_ARC_PCT;
+      else if (leftSees)         steer = -STACK_SEARCH_ARC_PCT;
+      else if (rightSees)        steer =  STACK_SEARCH_ARC_PCT;
+      hwDrive(STACK_SEARCH_SPEED_PCT + steer, STACK_SEARCH_SPEED_PCT - steer);
+      break;
+    }
+
     case ST_CREEP:
-      if (go && GO_STOPS_ROUND) { hwStop(); setState(ST_DONE, "GO pressed again"); break; }
-      if (!bothFresh)  { hwStop(); setState(ST_DONE, "ToF stale - stopped"); break; }
-      if (now - stateMs > STACK_CREEP_MAX_MS) { hwStop(); setState(ST_DONE, "creep timeout"); break; }
-      if (mismatchConfirmed) { hwStop(); setState(ST_DONE, "mismatch confirmed - notch/top disagree, likely lying"); break; }
-      if (matched && metal) { hwSoftStop(); setState(ST_SETTLE, "notch/top agree + metal"); break; }
+      if (!creepOk) { hwStop(); setState(ST_DONE, "notch/top ToF stale - stopped"); break; }
+      if (!notchPresent) { setState(ST_SEARCH, "candidate left the notch FoV"); break; }
+      if (mismatchConfirmed) { hwStop(); setState(ST_REVERSE, "mismatch confirmed - notch sees it, top never did (likely lying)"); break; }
+      if (held > STACK_CREEP_MAX_MS) { hwStop(); setState(ST_REVERSE, "creep hard cap - giving up regardless"); break; }
       hwDrive(CREEP_SPEED_PCT, CREEP_SPEED_PCT);
+      break;
+
+    case ST_REVERSE:
+      if (held < REJECT_REVERSE_MS) hwDrive(-REJECT_REVERSE_PCT, -REJECT_REVERSE_PCT);
+      else if (held < REJECT_REVERSE_MS + REPOSITION_TURN_MS) hwDrive(REPOSITION_SPEED_PCT, -REPOSITION_SPEED_PCT);
+      else setState(ST_SEARCH, "reverse complete - resuming search");
       break;
 
     case ST_SETTLE:   // soft stop ramps down; crane only starts once it has finished
       hwSoftStop();
-      if (now - stateMs >= DRIVE_DECEL_MS + 100) { hwPickupStart(); setState(ST_PICKUP, "crane start"); }
+      if (held >= DRIVE_DECEL_MS + 100) { hwPickupStart(); setState(ST_PICKUP, "crane start"); }
       break;
 
     case ST_PICKUP:
       hwSoftStop();   // keeps the tracks held at zero while the crane runs
       // 100 ms guard: busy may only go true after the next collection_update()
-      if ((now - stateMs > 100 && !hwPickupBusy()) || now - stateMs > PICKUP_TIMEOUT_MS) {
+      if ((held > 100 && !hwPickupBusy()) || held > PICKUP_TIMEOUT_MS) {
         Serial.println(metal ? ">>> metal STILL at notch - grab missed" : ">>> metal gone - grab ok");
-        setState(ST_DONE, "pickup finished");
+        setState(ST_SEARCH, "pickup finished - resuming search");
       }
       break;
   }
@@ -249,14 +330,11 @@ void loop() {
   static unsigned long lastPrint = 0;
   if (now - lastPrint >= TELEMETRY_MS) {
     lastPrint = now;
-    Serial.print(now);      Serial.print('\t'); Serial.print((int)state);   Serial.print('\t');
-    Serial.print(notch.mm); Serial.print('\t'); Serial.print(notch.raw);    Serial.print('\t');
-    Serial.print(notch.st); Serial.print('\t');
-    Serial.print(top.mm);   Serial.print('\t'); Serial.print(top.raw);      Serial.print('\t');
-    Serial.print(top.st);   Serial.print('\t');
-    Serial.print(metal);    Serial.print('\t'); Serial.print(notchIn);      Serial.print('\t');
-    Serial.print(topIn);    Serial.print('\t');
-    Serial.print(diff);     Serial.print('\t'); Serial.print(matched);      Serial.print('\t');
-    Serial.println(mismatchConfirmed);
+    Serial.print(now);        Serial.print('\t'); Serial.print(stateName(state)); Serial.print('\t');
+    Serial.print(notch.mm);   Serial.print('\t'); Serial.print(top.mm);           Serial.print('\t');
+    Serial.print(searchL.mm); Serial.print('\t'); Serial.print(searchR.mm);       Serial.print('\t');
+    Serial.print(metal);      Serial.print('\t');
+    Serial.print(diff);       Serial.print('\t'); Serial.print(mismatchConfirmed); Serial.print('\t');
+    Serial.print(lastDriveLeftPct()); Serial.print('\t'); Serial.println(lastDriveRightPct());
   }
 }

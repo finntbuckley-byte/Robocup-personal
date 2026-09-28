@@ -604,39 +604,49 @@ const unsigned long IR_READ_MS   = 30;
 const unsigned long TELEMETRY_MS = 200;
 
 // ---------------------------------------------------------------------------
-// STACK TEST (stack_test.cpp, [env:stacktest]) - notch ToF (underside, cone
-// up) + top ToF (57 mm up, cone down) + inductive, creep-and-centre pickup
-// test. Standalone rig - does NOT touch tof.cpp/navigation.cpp, and the top
-// sensor here is the same physical CON31/XSHUT4 part as TOF_TOP above (only
-// one env is ever flashed at a time, so no runtime conflict - just the same
-// hardware used by two different standalone programs).
+// STACK TEST (stack_test.cpp, [env:stacktest]) - SEARCH (drive + steer toward
+// a weight seen by the two outer weight-search ToFs) -> CREEP (once the
+// underside notch ToF sees something) -> confirm against the top ToF ->
+// REVERSE (rejected) or keep going until the inductive sensor fires, which
+// overrides everything and starts collection immediately. Bench rig only -
+// does NOT touch tof.cpp/navigation.cpp. The four ToFs here are the same
+// physical sensors as the main build's TOF_BL/TOF_BR/TOF_UPRIGHT/TOF_TOP -
+// only one env is ever flashed at a time, so no runtime conflict.
+//
+// Geometry (from the team's sensor layout drawing, 2026-09-28): top plate at
+// 34mm, all ToFs at 57mm up EXCEPT the underside/notch ToF (13mm) and the
+// inductive sensor (50mm). The 13mm notch beam crosses both an upright
+// weight's lower body and a lying weight's silhouette (max ~50mm tall on its
+// side) - it can't tell them apart alone. The 57mm top ToF only intersects
+// an upright weight's TOP 13mm (57-70mm) - never a lying one - but that also
+// means it legitimately reads NOTHING for most of a real upright weight's
+// creep-in, until it's nearly fully seated. That's why this can't be a short
+// fixed timeout: "notch present, top absent" is the NORMAL state while a
+// real weight is still arriving, not just the lying-weight signature. The
+// distinguishing test is whether it EVER resolves as the creep continues.
 // ---------------------------------------------------------------------------
-const int STACK_XSHUT_NOTCH = 0;   // CON27, L1X, underside ~17 mm up, cone up
-const int STACK_XSHUT_TOP   = 4;   // CON31, 57 mm up, cone down
-const int STACK_TOP_ROI     = 8;   // L1X ROI side in SPADs (4..16, 16 = full). TODO(verify): starting guess
+const int STACK_XSHUT_NOTCH    = 0;   // CON27, L1X, underside ~13 mm up, cone up
+const int STACK_XSHUT_TOP      = 4;   // CON31, L1X, 57 mm up, cone down
+const int STACK_XSHUT_SEARCH_L = 2;   // CON29, L0X, outer weight-search, left
+const int STACK_XSHUT_SEARCH_R = 1;   // CON28, L0X, outer weight-search, right
+const int STACK_TOP_ROI        = 8;   // L1X ROI side in SPADs (4..16, 16 = full). TODO(verify): starting guess
 
-// "Centred" bands in mm. 0 = unset = pickup can never fire (safe default).
-// Set live over serial (a/b/c/d) from bench readings, then paste the values here.
-const int STACK_NOTCH_MIN_MM = 0;
-const int STACK_NOTCH_MAX_MM = 0;
-const int STACK_TOP_MIN_MM   = 0;
-const int STACK_TOP_MAX_MM   = 0;
+// SEARCH: drive forward, arc toward whichever outer ToF sees something
+// closer within this range. TODO(verify): starting guesses, not bench-tuned.
+const int STACK_SEARCH_MAX_MM    = 300;
+const int STACK_SEARCH_SPEED_PCT = 40;
+const int STACK_SEARCH_ARC_PCT   = 16;   // matches ONE_SIDE_ARC_PCT's magnitude
 
-const unsigned long STACK_CENTRE_CONFIRM_MS = 100;   // both bands held this long
-const unsigned long STACK_CREEP_MAX_MS      = 6000;  // TODO(verify): no obstacle sensing in this test
-
-// Discrepancy check (2026-09-28 bench data): upright real/dummy read notch
-// and top within the SAME 60-110mm band, but a lying weight's bands (30-90
-// or 50-130, varies by which way it fell) overlap that upright band heavily
-// - an absolute-band check alone can't reliably tell them apart. The gap
-// between the two sensors is the actual signal: small and consistent when
-// upright (both looking at essentially the same surface), bigger when
-// lying (the two sensors see different points on an elongated shape).
-// TODO(verify): STACK_DISCREPANCY_MM is a starting guess from your bench
-// numbers, not yet characterised against many samples - tune live with 'e'
-// while re-presenting all four cases (empty/real/dummy/lying), the same way
-// the a/b/c/d bands are tuned.
-const int STACK_DISCREPANCY_MM = 40;   // |notch_mm - top_mm| above this = mismatch
-// Debounced BOTH ways so neither a match nor a mismatch fires off one noisy
-// frame - "consistency" per the bench findings. Live-tunable with 'f'.
-const unsigned long STACK_MATCH_CONFIRM_MS = 300;
+// Confirm logic: "mismatch" = notch present with top NEVER confirming (the
+// expected lying-weight signature), OR both valid but far apart (a weaker
+// secondary signal - e.g. a partial/angled top return). Either resets to
+// zero the instant top produces ANY valid reading, since that's active
+// evidence the weight is still arriving, not lying down.
+// TODO(verify): both values are starting guesses - tune live with 'e'/'f'
+// while re-presenting empty/real/dummy/lying, watching the 'diff'/'mismatch'
+// telemetry columns, THEN paste the values back here. STACK_MISMATCH_CONFIRM_MS
+// is deliberately long (patience over speed, per team decision 2026-09-28) -
+// it only needs to be shorter than STACK_CREEP_MAX_MS, the hard fallback cap.
+const int STACK_DISCREPANCY_MM = 40;         // |notch_mm - top_mm| above this = mismatch (secondary signal)
+const unsigned long STACK_MISMATCH_CONFIRM_MS = 1500;
+const unsigned long STACK_CREEP_MAX_MS        = 8000;  // hard cap regardless of the above - safety net, not the normal path
