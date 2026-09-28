@@ -394,16 +394,20 @@ const unsigned long IMU_RECOVER_MS = 100;
 // 28/9 floor runs, PD only (KP 2, KD 0.2): the ~10 deg right turn became a
 // steady ~5 deg (IMU matched the ruler within 0.7 deg) - P alone settles
 // where KP*err balances the track drag. KI added to remove that offset.
-// TODO(verify): tune on the floor with enctest ('H' toggles the hold) -
-// weaving = lower KP/KI or raise KD; slow to come back = raise KI.
-const float HEADING_KP        = 2.0f;   // % per degree of error
-const float HEADING_KI        = 2.0f;   // % per degree-second of error
-const float HEADING_KD        = 0.2f;   // % per deg/s of yaw rate (damping)
+// TODO(verify): CHOSEN AS A STARTING POINT (2026-09-28) from enctest floor
+// traces, not fully validated - the traces so far showed clean tracking of
+// small errors but hadn't fully converged after a mid-run disturbance within
+// a 3s test window. Keep tuning with enctest ('H' toggles the hold, 'T'
+// prints traces): weaving = lower KP/KI or raise KD; slow to come back =
+// raise KI.
+const float HEADING_KP        = 5.0f;   // % per degree of error
+const float HEADING_KI        = 0.5f;   // % per degree-second of error
+const float HEADING_KD        = 0.5f;   // % per deg/s of yaw rate (damping)
 const float HEADING_I_MAX     = 20.0f;  // % cap on the integral's share (anti-windup)
 // Where the integral starts at every headingHoldReset() (boot, round start):
 // the robot's learned drag bias, so each round begins already compensated.
 // TODO(verify): 0 until measured - read the steady 'integral' column from
-// enctest traces ('T') AFTER the flange reprint (28/9) and put it here.
+// enctest traces ('T') and put it here once it settles to a stable value.
 const float HEADING_I_START   = 0.0f;
 const int   HEADING_MAX_STEER = 30;     // % cap on the total
 // nav FORWARD: hold the heading while cruising. Any intentional steer (8x8
