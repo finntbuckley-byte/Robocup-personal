@@ -3,35 +3,6 @@
 Work top to bottom. 🤖 = Claude can do it from the laptop once the Teensy is plugged in (with a
 **data** USB cable).
 
-## 00. Arena round simulation 28/9 (`docs/testdata/2026-09-28_1450_arena_round_sim.log`)
-Result: full round to 118.5 s, **2 weights collected** (each on the 2nd grab), 2 REJECTs, `abd` 0,
-0 IMU resets, 0 ToF recoveries, 8x8 never stale. **Obstacle avoidance good** (team).
-- [~] *(coded 28/9, test next round)* **Seat the weight before the crane.** Both first grabs missed
-      with the notch ToF at 75-83 mm (seated = 57-61) - the robot stopped the instant metal read.
-      Now it creeps on until the notch reads <= `SEAT_UPRIGHT_MM` (62) or `SEAT_MAX_MS` (300), also
-      before a retry. Log line `>>> SEAT: notch X mm after Y ms`.
-- [~] *(coded 28/9, test next round)* **Slow zone** against knocked-over weights: a bottom ToF
-      within `SLOW_ZONE_MM` (250) caps FORWARD and APPROACH at creep speed. (Creep itself is already
-      the slowest the tracks run - the knock-overs came from FORWARD at 95-100 % / APPROACH at 55 %.)
-- [ ] **Missed weights early in the round - 2 causes found in the log:**
-  - [~] *(coded 28/9: candidate kept `WEIGHT_LOST_MS` 300 ms)* A single dropped bottom-ToF reading ends an APPROACH (4.5 s, 12.3 s, 16.5 s: candidate at
-        320-455 mm lost for one frame -> FORWARD). Keep the candidate ~300 ms before giving up.
-  - [~] *(coded 28/9: CREEP steers `CREEP_STEER_PCT` 12 toward a side reading < `CREEP_FLANK_MM` 120; `CREEP_MAX_MS` 1000 -> 1500)* Weights end up on the **flank of the V** (17-18.8 s: bottom-left 23-37 mm, never reached the
-        inductive) -> CREEP drives straight -> REJECT of a **real weight**. Steer CREEP toward the
-        side still seeing it.
-- [ ] **Notch ToF being re-angled** (it missed a knocked-over weight): re-measure seated (was
-      57-61), empty and lying readings -> `SEAT_UPRIGHT_MM`, `FUNNEL_PRESENT_MM`.
-- [ ] Funnel classifier (telemetry only) counted a real weight as a dummy: the notch ToF saw it
-      before the inductive did, and the 200 ms window closed first. Low priority.
-- [ ] **Colour sensor (TCS34725)** - the robot drove into the opposing base. (Rules don't forbid
-      entering; the penalty is for taking their delivered weights, 4.5.3.) Also confirms our own base
-      for homing. ⚠ Put it on **`Wire1`** (8x8 bus): it's 0x29, which the ToF recovery uses on `Wire`.
-- [ ] **Pose check:** encoders looked accurate; next round mark start + end on the floor with tape
-      and compare with `px`/`py` (this round: -0.34 m / -2.19 m after 9.2 m, unmeasured).
-- [ ] **Remember rejected dummies by position** (idea 2 from the elise-n-2431 repo) once the pose
-      check passes: store x/y at each REJECT, ignore candidates within ~100 mm for the round.
-- Pickup push-out data (floor): real lifts lost the metal at **1.81 s and 2.04 s** after crane start.
-
 ## 0. Next session (from 27–28/9 late)
 - [x] **Notch ToF fault (28/9): the sensor (or its cable) was faulty, not the port.** Swapping
       CON27 <-> CON30 moved the fault with the sensor; a replacement on CON27 then ranged cleanly

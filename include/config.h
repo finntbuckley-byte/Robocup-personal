@@ -389,9 +389,6 @@ const int WEIGHT_MIN_MM        = 60;
 const int WEIGHT_MAX_MM        = 500;   // was 700
 const int DIFF_CLEAR_MARGIN_MM = 250;
 const int WEIGHT_STICK_MS      = 250;   // was 120 - single-frame flickers started approaches
-// once found, a candidate survives this long without being seen (one dropped
-// bottom-ToF frame ended three real approaches in the arena 28/9)
-const unsigned long WEIGHT_LOST_MS = 300;
 
 // APPROACH must make progress: the candidate has to get at least
 // APPROACH_MIN_CLOSE_MM closer every APPROACH_PROGRESS_MS, and the tracks
@@ -417,30 +414,8 @@ const int SCAN_CLEAR_MM = 600;
 const unsigned long INDUCTIVE_CONFIRM_MS = 60;    // metal must read steadily this long
 const int  CREEP_START_MM   = 200;   // candidate lost closer than this -> creep, not give up
 const int  CREEP_SPEED_PCT  = 30;
-const unsigned long CREEP_MAX_MS = 1500;   // no metal by then -> REJECT (was 1000; +time to steer a flank weight in)
-// CREEP steers toward a weight on the FLANK of the V: one bottom ToF closer
-// than CREEP_FLANK_MM (the other not) -> turn that way by CREEP_STEER_PCT.
-// Arena 28/9: bottom-left 23-37mm for a whole second -> real weight REJECTed.
-// TODO(verify) on the floor.
-const int CREEP_FLANK_MM  = 120;
-const int CREEP_STEER_PCT = 12;
+const unsigned long CREEP_MAX_MS = 1000;   // no metal by then -> REJECT
 const int  MAX_PICKUP_TRIES = 2;
-
-// SEAT before the crane: after the inductive confirms metal, keep creeping
-// until the notch ToF reads the weight as seated, or SEAT_MAX_MS. Arena 28/9:
-// both first grabs missed with the notch at 75-83mm (seated = 57-61mm).
-// TODO(verify): the notch ToF is being re-angled - re-measure the seated
-// reading and update SEAT_UPRIGHT_MM (the time limit still seats it if not).
-const int SEAT_SPEED_PCT  = 30;          // = creep, the slowest the tracks run
-const int SEAT_UPRIGHT_MM = 62;
-const unsigned long SEAT_MAX_MS = 300;
-
-// SLOW ZONE: a bottom ToF sees something within SLOW_ZONE_MM -> FORWARD and
-// APPROACH drop to NEAR_WEIGHT_SPEED_PCT so a weight isn't knocked over as it
-// enters the notch (arena 28/9: knocked over "multiple times", FORWARD hit
-// one at 95-100%). Walls in range also trigger it - that only makes it safer.
-const int SLOW_ZONE_MM          = 250;
-const int NEAR_WEIGHT_SPEED_PCT = 30;
 // after giving up on a weight, the inductive trigger stays locked until the
 // notch has read clear this long (else a stuck weight is retried forever)
 const unsigned long METAL_REARM_CLEAR_MS = 500;     // metal still in the notch after a cycle = missed grab -> retry

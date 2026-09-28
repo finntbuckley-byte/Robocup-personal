@@ -222,33 +222,11 @@ static void startApproach()
   setMode(MODE_APPROACH);
 }
 
-// SEAT before every crane cycle (arena round 28/9: both first grabs MISSED
-// with the notch ToF at 75-83mm - the weight was 15-20mm short of seated
-// (57-61mm) because the robot stopped the instant the inductive read metal;
-// the miss nudged it in and the retry worked). Creep on until the notch ToF
-// says seated or SEAT_MAX_MS, THEN start the crane.
-static bool seating = false;
-
-static bool weightSeated()
-{
-  return tofOk(TOF_UPRIGHT) && tofUpright > 0 && tofUpright <= SEAT_UPRIGHT_MM;
-}
-
 static void startPickup()
 {
   repositionDir = (lastWeightSide < 0) ? +1 : -1;   // peel away from its side
   pickupStarted = false;
-  seating = true;
   setMode(MODE_PICKUP);
-}
-
-// slow zone: something low and close ahead -> no faster than creep, so a
-// weight entering the notch isn't knocked over (arena 28/9: FORWARD drove
-// into a weight at 95-100% and weights were knocked over "multiple times")
-static bool lowAndClose()
-{
-  return (tofOk(TOF_BL) && tofBL > 0 && tofBL < SLOW_ZONE_MM) ||
-         (tofOk(TOF_BR) && tofBR > 0 && tofBR < SLOW_ZONE_MM);
 }
 
 static void startReject()
@@ -419,18 +397,6 @@ void navigationUpdate()
       break;
 
     case MODE_PICKUP:
-      if (seating)
-      {
-        if (weightSeated() || held >= SEAT_MAX_MS)
-        {
-          seating = false;
-          Serial.print(">>> SEAT: notch "); Serial.print(tofUpright);
-          Serial.print(" mm after "); Serial.print(held); Serial.print(" ms");
-          Serial.println(weightSeated() ? " (seated)" : " (time limit)");
-          modeStart = millis();          // PICKUP_TIMEOUT counts from the crane start
-        }
-        break;                           // creeping - act section drives
-      }
       if (!pickupStarted)
       {
         collection_start();      // partner's crane/magnet FSM
@@ -463,7 +429,6 @@ void navigationUpdate()
         if (!timedOut && stillThere && pickupTries < MAX_PICKUP_TRIES)
         {
           pickupStarted = false;          // retry in place
-          seating = true;                 // seat it again first (the miss may have moved it)
           modeStart = millis();
           break;
         }
@@ -504,7 +469,6 @@ void navigationUpdate()
     case MODE_FORWARD:
     {
       int speed = x8Fresh() ? CRUISE_SPEED_PCT : BLIND_SPEED_PCT;
-      if (lowAndClose() && speed > NEAR_WEIGHT_SPEED_PCT) speed = NEAR_WEIGHT_SPEED_PCT;   // slow zone
       int steer = cautionVeer();
       if (sideNearLeft())  steer += SIDE_NUDGE_PCT;
       if (sideNearRight()) steer -= SIDE_NUDGE_PCT;
@@ -555,28 +519,16 @@ void navigationUpdate()
         steer = (weightSide < 0) ? -ONE_SIDE_ARC_PCT : +ONE_SIDE_ARC_PCT;
         approachErrPrev = 0;
       }
-      int speed = lowAndClose() ? NEAR_WEIGHT_SPEED_PCT : APPROACH_SPEED_PCT;   // slow zone
-      drive(speed + steer, speed - steer);
+      drive(APPROACH_SPEED_PCT + steer, APPROACH_SPEED_PCT - steer);
       break;
     }
 
     case MODE_CREEP:
-    {
-      // Steer toward a weight sitting on the FLANK of the V (arena 28/9:
-      // bottom-left read 23-37mm for a whole second, creep drove straight,
-      // the weight never reached the inductive -> real weight REJECTed).
-      // Weight close on one side only -> turn that way to bring it into the
-      // middle. Neither sees it (the blind gap) -> straight, as before.
-      bool l = tofOk(TOF_BL) && tofBL > 0 && tofBL < CREEP_FLANK_MM;
-      bool r = tofOk(TOF_BR) && tofBR > 0 && tofBR < CREEP_FLANK_MM;
-      int steer = (l && !r) ? -CREEP_STEER_PCT : (r && !l) ? +CREEP_STEER_PCT : 0;
-      drive(CREEP_SPEED_PCT + steer, CREEP_SPEED_PCT - steer);
+      drive(CREEP_SPEED_PCT, CREEP_SPEED_PCT);   // straight - nothing to steer on in the blind gap
       break;
-    }
 
     case MODE_PICKUP:
-      if (seating) drive(SEAT_SPEED_PCT, SEAT_SPEED_PCT);   // push it the last 15-20mm in
-      else         stopMotors();                            // hold still while the crane works
+      stopMotors();     // hold still while the crane works
       break;
 
     case MODE_REJECT:

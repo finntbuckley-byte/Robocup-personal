@@ -30,7 +30,6 @@ uint16_t weightDistMM = 0;
 int      pickupAttempts = 0;
 
 static unsigned long weightSeenSince = 0;
-static unsigned long weightLastSeen = 0;   // last update the candidate was actually seen (grace)
 static unsigned long targetSuppressUntil = 0;
 
 void suppressTargetFor(unsigned long ms)
@@ -58,7 +57,6 @@ void weightDetectUpdate()
     if (millis() - weightSeenSince >= WEIGHT_STICK_MS)
     {
       weightFound = true;
-      weightLastSeen = millis();
       if (L && R)
       {
         weightSide   = 0;
@@ -70,11 +68,6 @@ void weightDetectUpdate()
   }
   else
   {
-    // Grace: one dropped reading mustn't end an approach (arena 28/9: the
-    // bottom ToF read 0 for a single frame at 320-455mm three times and the
-    // robot gave up on real weights). Keep the last candidate - and its
-    // persistence timer - for WEIGHT_LOST_MS before dropping it.
-    if (weightFound && millis() - weightLastSeen < WEIGHT_LOST_MS) return;
     weightSeenSince = 0;
     weightFound     = false;
     weightSide      = 0;
