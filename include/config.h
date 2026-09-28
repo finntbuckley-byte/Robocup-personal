@@ -598,3 +598,25 @@ const unsigned long SCAN_MAX_MS     = 2600;
 const unsigned long TOF_READ_MS  = 55;
 const unsigned long IR_READ_MS   = 30;
 const unsigned long TELEMETRY_MS = 200;
+
+// ---------------------------------------------------------------------------
+// STACK TEST (stack_test.cpp, [env:stacktest]) - notch ToF (underside, cone
+// up) + top ToF (57 mm up, cone down) + inductive, creep-and-centre pickup
+// test. Standalone rig - does NOT touch tof.cpp/navigation.cpp, and the top
+// sensor here is the same physical CON31/XSHUT4 part as TOF_TOP above (only
+// one env is ever flashed at a time, so no runtime conflict - just the same
+// hardware used by two different standalone programs).
+// ---------------------------------------------------------------------------
+const int STACK_XSHUT_NOTCH = 0;   // CON27, L1X, underside ~17 mm up, cone up
+const int STACK_XSHUT_TOP   = 4;   // CON31, 57 mm up, cone down
+const int STACK_TOP_ROI     = 8;   // L1X ROI side in SPADs (4..16, 16 = full). TODO(verify): starting guess
+
+// "Centred" bands in mm. 0 = unset = pickup can never fire (safe default).
+// Set live over serial (a/b/c/d) from bench readings, then paste the values here.
+const int STACK_NOTCH_MIN_MM = 0;
+const int STACK_NOTCH_MAX_MM = 0;
+const int STACK_TOP_MIN_MM   = 0;
+const int STACK_TOP_MAX_MM   = 0;
+
+const unsigned long STACK_CENTRE_CONFIRM_MS = 100;   // both bands held this long
+const unsigned long STACK_CREEP_MAX_MS      = 6000;  // TODO(verify): no obstacle sensing in this test
