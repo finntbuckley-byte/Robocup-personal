@@ -1,7 +1,16 @@
-// stack_test.cpp - creep on GO until (notch ToF in band AND top ToF in band
-// AND inductive metal), then stop and run the crane. 115200 baud, TSV output.
+// stack_test.cpp - creep on GO until notch+top AGREE (small, consistent
+// |notch_mm - top_mm|) AND inductive reads metal, then stop and run the
+// crane. Bench data (28/9): upright real/dummy read both sensors in the
+// SAME ~60-110mm band, but that band overlaps a LYING weight's readings
+// (30-90 or 50-130 depending on which way it fell) too much to tell them
+// apart on absolute distance alone - the gap between the two sensors is
+// the actual signal (small+steady = upright, bigger = lying), so that's
+// what gates the pickup here. A confirmed, persistent MISMATCH aborts the
+// attempt outright rather than waiting for the creep timeout.
+// 115200 baud, TSV output.
 // Serial: x = stop now | r = re-arm | s = print bands
 //         a<mm> notch min | b<mm> notch max | c<mm> top min | d<mm> top max
+//         e<mm> max |notch-top| to count as agreement | f<ms> confirm time
 // Standalone test module: does NOT touch tof.cpp / navigation.cpp.
 #include <Arduino.h>
 #include <Wire.h>
@@ -40,6 +49,8 @@ static unsigned long stateMs = 0;
 // runtime-tunable bands (start from config.h)
 static int nLo = STACK_NOTCH_MIN_MM, nHi = STACK_NOTCH_MAX_MM;
 static int tLo = STACK_TOP_MIN_MM,   tHi = STACK_TOP_MAX_MM;
+static int dMax = STACK_DISCREPANCY_MM;
+static unsigned long matchMs = STACK_MATCH_CONFIRM_MS;
 
 static void setState(State s, const char *why) {
   state = s; stateMs = millis();
@@ -123,6 +134,8 @@ static void printBands() {
   Serial.print("bands notch "); Serial.print(nLo); Serial.print('-'); Serial.print(nHi);
   Serial.print("  top "); Serial.print(tLo); Serial.print('-'); Serial.println(tHi);
   if (nLo <= 0 || tLo <= 0) Serial.println("!! bands unset - pickup can't fire; set with a/b/c/d");
+  Serial.print("discrepancy max "); Serial.print(dMax); Serial.print("mm, confirm ");
+  Serial.print(matchMs); Serial.println("ms (set with e/f)");
 }
 
 static void handleSerial() {
@@ -139,6 +152,7 @@ static void handleSerial() {
       case 's': break;
       case 'a': nLo = v; break;  case 'b': nHi = v; break;
       case 'c': tLo = v; break;  case 'd': tHi = v; break;
+      case 'e': dMax = v; break; case 'f': matchMs = v; break;
       default: continue;
     }
     printBands();
@@ -165,7 +179,7 @@ void setup() {
   Serial.print("notch (XSHUT"); Serial.print(STACK_XSHUT_NOTCH); Serial.println(a ? ") ok" : ") FAILED");
   Serial.print("top   (XSHUT"); Serial.print(STACK_XSHUT_TOP);   Serial.println(b ? ") ok" : ") FAILED - is it an L1X?");
   printBands();
-  Serial.println("ms\tstate\tnotch_mm\tnotch_raw\tnotch_st\ttop_mm\ttop_raw\ttop_st\tmetal\tnotch_in\ttop_in");
+  Serial.println("ms\tstate\tnotch_mm\tnotch_raw\tnotch_st\ttop_mm\ttop_raw\ttop_st\tmetal\tnotch_in\ttop_in\tdiff\tmatch\tmismatch");
 }
 
 void loop() {
@@ -176,14 +190,26 @@ void loop() {
   handleSerial();
 
   bool metal     = inductiveMetal(now);
-  bool notchIn   = inBand(notch.mm, nLo, nHi);
+  bool notchIn   = inBand(notch.mm, nLo, nHi);   // informational only - see discrepancy check below
   bool topIn     = inBand(top.mm, tLo, tHi);
   bool bothFresh = fresh(notch, now) && fresh(top, now);
 
-  // centred = both bands held for STACK_CENTRE_CONFIRM_MS
-  static unsigned long centredSince = 0;
-  if (notchIn && topIn) { if (!centredSince) centredSince = now; } else centredSince = 0;
-  bool centred = centredSince && now - centredSince >= STACK_CENTRE_CONFIRM_MS;
+  // Both sensors must have an actual valid return (not "lost target", which
+  // reads mm=0) before a small gap between them means anything - otherwise
+  // two sensors both seeing nothing would look like a perfect "agreement".
+  bool bothValid = notch.mm > 0 && top.mm > 0;
+  int diff = bothValid ? (int)notch.mm - (int)top.mm : 999;
+  if (diff < 0) diff = -diff;
+  bool agree    = bothValid && diff <= dMax;
+  bool disagree = bothValid && diff >  dMax;
+
+  // debounced BOTH ways - one noisy frame shouldn't trigger a pickup OR
+  // abort one; see config.h STACK_DISCREPANCY_MM/STACK_MATCH_CONFIRM_MS
+  static unsigned long agreeSince = 0, disagreeSince = 0;
+  if (agree)    { if (!agreeSince) agreeSince = now; }    else agreeSince = 0;
+  if (disagree) { if (!disagreeSince) disagreeSince = now; } else disagreeSince = 0;
+  bool matched          = agreeSince    && now - agreeSince    >= matchMs;
+  bool mismatchConfirmed = disagreeSince && now - disagreeSince >= matchMs;
 
   bool go = goEdge(now);
 
@@ -200,7 +226,8 @@ void loop() {
       if (go && GO_STOPS_ROUND) { hwStop(); setState(ST_DONE, "GO pressed again"); break; }
       if (!bothFresh)  { hwStop(); setState(ST_DONE, "ToF stale - stopped"); break; }
       if (now - stateMs > STACK_CREEP_MAX_MS) { hwStop(); setState(ST_DONE, "creep timeout"); break; }
-      if (centred && metal) { hwSoftStop(); setState(ST_SETTLE, "centred + metal"); break; }
+      if (mismatchConfirmed) { hwStop(); setState(ST_DONE, "mismatch confirmed - notch/top disagree, likely lying"); break; }
+      if (matched && metal) { hwSoftStop(); setState(ST_SETTLE, "notch/top agree + metal"); break; }
       hwDrive(CREEP_SPEED_PCT, CREEP_SPEED_PCT);
       break;
 
@@ -228,6 +255,8 @@ void loop() {
     Serial.print(top.mm);   Serial.print('\t'); Serial.print(top.raw);      Serial.print('\t');
     Serial.print(top.st);   Serial.print('\t');
     Serial.print(metal);    Serial.print('\t'); Serial.print(notchIn);      Serial.print('\t');
-    Serial.println(topIn);
+    Serial.print(topIn);    Serial.print('\t');
+    Serial.print(diff);     Serial.print('\t'); Serial.print(matched);      Serial.print('\t');
+    Serial.println(mismatchConfirmed);
   }
 }

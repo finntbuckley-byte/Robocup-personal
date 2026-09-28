@@ -624,3 +624,19 @@ const int STACK_TOP_MAX_MM   = 0;
 
 const unsigned long STACK_CENTRE_CONFIRM_MS = 100;   // both bands held this long
 const unsigned long STACK_CREEP_MAX_MS      = 6000;  // TODO(verify): no obstacle sensing in this test
+
+// Discrepancy check (2026-09-28 bench data): upright real/dummy read notch
+// and top within the SAME 60-110mm band, but a lying weight's bands (30-90
+// or 50-130, varies by which way it fell) overlap that upright band heavily
+// - an absolute-band check alone can't reliably tell them apart. The gap
+// between the two sensors is the actual signal: small and consistent when
+// upright (both looking at essentially the same surface), bigger when
+// lying (the two sensors see different points on an elongated shape).
+// TODO(verify): STACK_DISCREPANCY_MM is a starting guess from your bench
+// numbers, not yet characterised against many samples - tune live with 'e'
+// while re-presenting all four cases (empty/real/dummy/lying), the same way
+// the a/b/c/d bands are tuned.
+const int STACK_DISCREPANCY_MM = 40;   // |notch_mm - top_mm| above this = mismatch
+// Debounced BOTH ways so neither a match nor a mismatch fires off one noisy
+// frame - "consistency" per the bench findings. Live-tunable with 'f'.
+const unsigned long STACK_MATCH_CONFIRM_MS = 300;
