@@ -246,6 +246,8 @@ goes stale, the robot crawls and ignores weights.
 | `CREEP` | The bottom pair lost a candidate within 20 cm (they're blind once it's in the notch), so creep straight for up to 1 s |
 | `PICKUP` | **Triggered by the inductive sensor reading metal** (debounced 60 ms). Stop, run the crane, wait for `collection_busy()`. Metal gone afterwards = success (`noteCollected`); still there = retry once |
 | `REJECT` | The creep ended with no metal (dummy, lying weight or nothing): reverse ~10 cm, pivot away, ignore the spot for 4 s. **Unproven:** the floor test is on the todo list, and the flinger is the fallback |
+
+**Team decision 2026-09-28: knocked-over (lying) weights are ignored.** They never read as metal, so they can't trigger a pickup; REJECT backs away from them like a dummy. The notch ToF *can* see them, but lying steel and lying plastic look identical, so picking them up would waste crane cycles on dummies. Revisit only once the upright pickup chain is proven.
 | `REPOSITION` | Turn away after a pickup |
 
 Round strategy: stop collecting at **3 targets on board** (`MAX_TARGETS_ON_BOARD`). Planned: the
@@ -299,6 +301,7 @@ or insert-dummies read as metal. Weights must pass within ~6 mm.
 | GO button | idle ~0.6 V, pressed ~3.0 V → active HIGH |
 | Crane (pickup 118° @ 45°/s, drop 40° @ 60°/s, rest 70° @ 100°/s) | ~5.0 s full cycle, clean grip and drop with a weight; endurance loop gave no heat |
 | Insert-dummy at the notch | **not tested yet** (none available) |
+| Notch ToF, lying weight (28/9, replacement sensor) | side-on **110 mm**, end-on **149 mm**, vs upright 59 mm and empty 196–220 mm in the same scene. Detectable, but "empty" = whatever is ahead (77 mm to 1.5 m seen), so it would need an 8×8 cross-check |
 
 ### Ultrasound (as read by the test code, ≈cm units) — **no longer on the robot**
 - 0–1 mm reads **814** (dead-band / wrap). Treat that value as "object touching",
