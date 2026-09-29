@@ -171,20 +171,36 @@ static bool inductiveMetal(unsigned long now) {
 }
 
 // ---- GO button: arms only after being seen released (project rule) ---------
+// Matches round.cpp's goPressed(): arms after GO_DEBOUNCE_MS of CONTINUOUS
+// release (no prior press needed - a normally-idle button arms on its own
+// shortly after boot), then a single-shot fire after GO_DEBOUNCE_MS of
+// continuous press. The earlier edge-detect version needed an observed
+// press-then-release before it would arm, so it silently ate the first
+// real press and only fired on the second - fixed 2026-09-29.
 static bool goEdge(unsigned long now) {
   if (PIN_GO < 0) {                          // auto-start fallback
     static bool fired = false;
     if (!fired && now >= AUTO_START_DELAY_MS) { fired = true; return true; }
     return false;
   }
-  static bool armed = false, stable = false, lastRaw = false;
-  static unsigned long changeMs = 0;
-  bool raw = (digitalRead(PIN_GO) == (GO_ACTIVE_LOW ? LOW : HIGH));
-  if (raw != lastRaw) { lastRaw = raw; changeMs = now; }
-  if (now - changeMs >= GO_DEBOUNCE_MS && raw != stable) {
-    stable = raw;
-    if (!stable) armed = true;               // seen released
-    else if (armed) { armed = false; return true; }
+  static bool armed = false;
+  static unsigned long upSince = 0, downSince = 0;
+  bool active = (digitalRead(PIN_GO) == (GO_ACTIVE_LOW ? LOW : HIGH));
+
+  if (!armed)
+  {
+    if (active) { upSince = 0; return false; }
+    if (upSince == 0) upSince = now;
+    if (now - upSince >= GO_DEBOUNCE_MS) armed = true;
+    return false;
+  }
+
+  if (!active) { downSince = 0; return false; }
+  if (downSince == 0) downSince = now;
+  if (now - downSince >= GO_DEBOUNCE_MS)
+  {
+    armed = false;   // single-shot: must be seen released again before it fires again
+    return true;
   }
   return false;
 }
