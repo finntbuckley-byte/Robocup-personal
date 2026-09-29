@@ -11,6 +11,9 @@
 #define SERVODELAY2 900 //update after testing, motion from weight pickup to weight drop
 #define SERVODELAY3 400 //motion from weight drop back to holding position. Was 1500: the ~0.3 s rest move finished long before, so the robot just sat still
 #define WEIGHTDROPDELAY 1000  //update after testing, time until weight is safely dropped
+#define MAGNET_SETTLE_MS 200  //TODO: update after testing. Magnet on BEFORE the arm swings (was
+                               //simultaneous with arm.moveTo) so it's fully seated on the weight
+                               //before any movement risks dislodging it - see COLLECTION_MAGNET_ON
 
 Servo bigServo;
 static SmoothServo arm(bigServo); // non-blocking eased moves - see smooth_servo.h
@@ -33,6 +36,8 @@ int servoPos = 0;
 enum CollectionState
 {
     COLLECTION_IDLE,
+    COLLECTION_MAGNET_ON,  // magnet energised, arm still at its start position - let it seat
+                            // on the weight before the swing begins (2026-09-29)
     COLLECTION_PICKUP,
     COLLECTION_MOVE_TO_DROP,
     COLLECTION_DROP,
@@ -80,9 +85,9 @@ void collection_start(bool holdAtRest)
     if (state == COLLECTION_IDLE)
     {
         collectionStateEntryTime = millis();
-        state = COLLECTION_PICKUP; //move into the pickup state which takes it from there
+        state = COLLECTION_MAGNET_ON; //energise the magnet first, arm swings once it's seated
         holdAtRestArmed = holdAtRest;
-        Serial.print(F("[collection] START -> PICKUP"));
+        Serial.print(F("[collection] START -> MAGNET_ON"));
         Serial.println(holdAtRest ? F(" (hold at rest - 3rd target)") : F(""));
         collectionStateEntry = true;
     }
@@ -103,16 +108,34 @@ void collection_update(void)
         case COLLECTION_IDLE:
             break;
 
+        case COLLECTION_MAGNET_ON:
+            if (collectionStateEntry)
+            {
+                Serial.print(F("[collection] MAGNET_ON: magnet ON, arm holding at start position  (settle "));
+                Serial.print(MAGNET_SETTLE_MS);
+                Serial.println(F("ms)"));
+                analogWrite(MAGNET, 255); // energise before the arm moves - let it seat on the weight
+                collectionStateEntry = false;
+            }
+
+            if (millis() - collectionStateEntryTime >= MAGNET_SETTLE_MS)
+            {
+                Serial.println(F("[collection] MAGNET_ON -> PICKUP"));
+                state = COLLECTION_PICKUP;
+                collectionStateEntryTime = millis();
+                collectionStateEntry = true;
+            }
+            break;
+
         case COLLECTION_PICKUP:
             if (collectionStateEntry)
             {
                 Serial.print(F("[collection] PICKUP: servo -> ")); Serial.print(tuning.pickupAngle);
                 Serial.print(F(" deg @ ")); Serial.print(tuning.pickupDps, 0);
-                Serial.print(F(" deg/s, magnets ON  (dwell "));
+                Serial.print(F(" deg/s  (dwell "));
                 Serial.print(SERVODELAY1);
                 Serial.println(F("ms)"));
-                arm.moveTo(tuning.pickupAngle, tuning.pickupDps); // eased
-                analogWrite(MAGNET, 255); //magnet is now on and will pick up weight when servo finishes moving
+                arm.moveTo(tuning.pickupAngle, tuning.pickupDps); // eased - magnet already on from MAGNET_ON
                 collectionStateEntry = false;
             }
 
