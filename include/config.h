@@ -542,7 +542,7 @@ const int   CRANE_REST_ANGLE   = 70;     // rest angle + speed cotrnfirmed by th
 const float CRANE_REST_DPS     = 100.0f;
 
 // Crane pins (used by collection.cpp).
-const int PIN_CRANE_SERVO = 28;   // CON67
+const int PIN_CRANE_SERVO = 15;   // TODO(verify): moved from pin 28 (CON67) - confirm which connector pin 15 is on the board
 // Single electromagnet via the FET board (reverted from the two-magnet array
 // - team decision, 2026-09-28; CLAUDE.md corrected to match). Moved from
 // CON74 (pin 26, no PWM on the Teensy 4.0) to CON72 (pin 24, PWM-capable) so

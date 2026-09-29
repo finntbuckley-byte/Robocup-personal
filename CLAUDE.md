@@ -92,7 +92,7 @@ holding >3 targets. Rejecting dummies matters (−0.5 each).
 | MCU | Teensy 4.0 on a custom PCB |
 | Locomotion | Supplied tracked chassis, two DC motors |
 | Motor driver | DFR0513 PPM driver on connector **CON65** (the SERIAL1 port: RX1 = D0, TX1 = D1). Motor 1 = **left**, motor 2 = **right**. Control is servo-style pulses: **1.05 ms full reverse, 1.50 ms stop, 1.95 ms full forward**; the driver ignores pulses outside its valid range |
-| Collection | Swing-arm crane with a **single electromagnet** (reverted from the earlier multi-magnet array - team decision, 2026-09-28). Crane servo on CON67 (pin 28); magnet via the FET board, moved 2026-09-28 to **pin 24 (CON72)** so it's PWM-capable, for a reduced holding level (see `BENCH_TODO.md` 2d) |
+| Collection | Swing-arm crane with a **single electromagnet** (reverted from the earlier multi-magnet array - team decision, 2026-09-28). Crane servo moved 2026-09-29 to **pin 15** (was CON67/pin 28 - TODO(verify): which connector pin 15 is on); magnet via the FET board, moved 2026-09-28 to **pin 24 (CON72)** so it's PWM-capable, for a reduced holding level (see `BENCH_TODO.md` 2d) |
 | Intake/storage | Funnel intake; hinged **rear flap** releases weights |
 | Sorting | Inductive proximity sensor **front-on at the V-notch, ~40 mm up**. It reads metal only when steel is within ~7 mm, so it both **gates the pickup** (steel weight seated in the notch → pick up; anything else → REJECT) and classifies metal vs non-metal. Dummies are rejected *before* pickup, not sorted after |
 | I2C | **TCA9548** mux (0x70) + **SX1509** GPIO expander at **0x3F**; the SX1509 drives ToF **XSHUT0–7** (plus BIO8–12) |
@@ -118,7 +118,8 @@ drive, 1× VL53L0X + 2× VL53L1X, serial ToF, 2× HC-SR04 ultrasound, DFRobot SE
 
 The **TCS34725 colour sensor has been dropped** from the design, so base arrival can't be
 confirmed by colour. The Herkulex gate servo goes through a digital level-shift board to
-**CON66 (SERIAL2)**. The crane servo is on **CON67** (pin 28).
+**CON66 (SERIAL2)**. The crane servo moved 2026-09-29 to **pin 15** (was CON67/pin 28) -
+TODO(verify): which connector pin 15 is on.
 
 > Only `nav_test.cpp` (commented out, a legacy rig) still references the old ToF layout.
 
