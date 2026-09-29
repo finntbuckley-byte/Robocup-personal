@@ -130,7 +130,8 @@ static void printNavTuning()
   Serial.print("  turn  (reject/reposition pivot) = "); Serial.print(t.repositionTurnMs); Serial.println(" ms");
   Serial.print("  disc  (lying discrepancy max)   = "); Serial.print(t.lyingDiscrepancyMm); Serial.println(" mm");
   Serial.print("  lconf (lying confirm window)    = "); Serial.print(t.lyingConfirmMs); Serial.println(" ms");
-  Serial.println("paste-ready for config.h: REJECT_REVERSE_MS / REPOSITION_TURN_MS / LYING_DISCREPANCY_MM / LYING_CONFIRM_MS");
+  Serial.print("  ccap  (creep cap, notch seen)   = "); Serial.print(t.creepCapMs); Serial.println(" ms");
+  Serial.println("paste-ready for config.h: REJECT_REVERSE_MS / REPOSITION_TURN_MS / LYING_DISCREPANCY_MM / LYING_CONFIRM_MS / CREEP_HARD_CAP_MS");
 }
 
 static void printHelp()
@@ -142,11 +143,13 @@ static void printHelp()
   Serial.println(" i  I2C scan of Wire and Wire1");
   Serial.println(" t  telemetry on/off");
   Serial.println(" x  KILL - stop motors until reset");
-  Serial.println(" nt  print live nav tuning (reverse/turn/lying-reject timings)");
-  Serial.println(" rev <ms>    set reject reverse duration   (e.g. 'rev 500')");
-  Serial.println(" turn <ms>   set reject/reposition pivot duration (e.g. 'turn 700')");
-  Serial.println(" disc <mm>   set lying-weight discrepancy max (e.g. 'disc 40')");
-  Serial.println(" lconf <ms>  set lying-weight confirm window (e.g. 'lconf 1500')");
+  Serial.println(" live tuning - type the line, then Enter:");
+  Serial.println(" :nt          print live nav tuning (reverse/turn/lying-reject/creep timings)");
+  Serial.println(" :rev <ms>    set reject reverse duration   (e.g. ':rev 500')");
+  Serial.println(" :turn <ms>   set reject/reposition pivot duration (e.g. ':turn 700')");
+  Serial.println(" :disc <mm>   set lying-weight discrepancy max (e.g. ':disc 40')");
+  Serial.println(" :lconf <ms>  set lying-weight confirm window (e.g. ':lconf 1500')");
+  Serial.println(" :ccap <ms>   set creep cap once the notch sees something (e.g. ':ccap 8000')");
   if (GO_STOPS_ROUND) Serial.println(" GO pressed again during a round = STOP (testing; off for competition)");
   Serial.println("=================================");
 }
@@ -211,43 +214,56 @@ static void printTelemetry()
   else             { Serial.println("-\t-"); }
 }
 
-// Multi-char commands ("rev 500") for live nav tuning, plus every legacy
-// single-char command unchanged. One line in (same convention as
-// encoder_test.cpp), so "rev 500\n" isn't split across two reads the way
-// single-char parsing would mangle it.
+// Never blocks (the old readStringUntil('\n') froze loop() for up to 1 s on
+// a key sent without Enter - motors held their last command, no avoidance).
+// Single keys act the moment they arrive, as before. Live tuning lines start
+// with ':' and run on Enter (":rev 500") - the prefix keeps 't' (telemetry)
+// apart from ":turn". 'x' kills immediately, even mid-line.
+static void runTuningLine(char *line)
+{
+  char *arg = strchr(line, ' ');
+  if (arg) *arg++ = 0;
+  long v = arg ? atol(arg) : -1;
+  NavTuning &t = navTuning();
+
+  if      (!strcasecmp(line, "nt")) {}
+  else if (v < 0) { Serial.println("?? needs a value, e.g. ':rev 500'"); return; }
+  else if (!strcasecmp(line, "rev"))   t.rejectReverseMs    = (unsigned long)v;
+  else if (!strcasecmp(line, "turn"))  t.repositionTurnMs   = (unsigned long)v;
+  else if (!strcasecmp(line, "disc"))  t.lyingDiscrepancyMm = (int)v;
+  else if (!strcasecmp(line, "lconf")) t.lyingConfirmMs     = (unsigned long)v;
+  else if (!strcasecmp(line, "ccap"))  t.creepCapMs         = (unsigned long)v;
+  else { Serial.print("?? unknown ':"); Serial.print(line); Serial.println("' - '?' for the menu"); return; }
+  printNavTuning();
+}
+
 static void handleSerial()
 {
-  if (!Serial.available()) return;
-  String line = Serial.readStringUntil('\n');
-  line.trim();
-  if (line.length() == 0) return;
+  static char buf[24];
+  static uint8_t n = 0;
+  static bool inLine = false;
 
-  int sp = line.indexOf(' ');
-  String key = sp < 0 ? line : line.substring(0, sp);
-  String arg = sp < 0 ? "" : line.substring(sp + 1);
-  String keyLower = key; keyLower.toLowerCase();
-
-  if (keyLower == "rev" && arg.length())
-  { navTuning().rejectReverseMs = (unsigned long)arg.toInt(); printNavTuning(); return; }
-  if (keyLower == "turn" && arg.length())
-  { navTuning().repositionTurnMs = (unsigned long)arg.toInt(); printNavTuning(); return; }
-  if (keyLower == "disc" && arg.length())
-  { navTuning().lyingDiscrepancyMm = arg.toInt(); printNavTuning(); return; }
-  if (keyLower == "lconf" && arg.length())
-  { navTuning().lyingConfirmMs = (unsigned long)arg.toInt(); printNavTuning(); return; }
-  if (keyLower == "nt") { printNavTuning(); return; }
-
-  if (line.length() == 1)
+  while (Serial.available())
   {
-    switch (line[0])
+    char c = Serial.read();
+    if (c == 'x') { killed = true; driveHardStop(); Serial.println("!!! KILLED - reset to run again"); inLine = false; n = 0; continue; }
+
+    if (inLine)
     {
-      case '?': printHelp(); return;
-      case 'g': x8PrintGrid(); return;
-      case 'u': tofPrintRaw(); return;
-      case 'i': i2cScan(); probeTofs("now"); return;
-      case 't': telemetryOn = !telemetryOn; if (telemetryOn) printTelemetryHeader(); return;
-      case 'x': killed = true; driveHardStop(); Serial.println("!!! KILLED - reset to run again"); return;
-      default: break;
+      if (c == '\r' || c == '\n') { buf[n] = 0; inLine = false; n = 0; runTuningLine(buf); }
+      else if (n < sizeof(buf) - 1) buf[n++] = c;
+      continue;
+    }
+
+    switch (c)
+    {
+      case ':': inLine = true; n = 0; break;
+      case '?': printHelp(); break;
+      case 'g': x8PrintGrid(); break;
+      case 'u': tofPrintRaw(); break;
+      case 'i': i2cScan(); probeTofs("now"); break;
+      case 't': telemetryOn = !telemetryOn; if (telemetryOn) printTelemetryHeader(); break;
+      default: break;   // stray Enter etc.
     }
   }
 }
