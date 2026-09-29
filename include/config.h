@@ -54,7 +54,7 @@
 //    UNCONFIRMED TOF_TOP (CON31/XSHUT4) - not physically wired yet
 //                (2026-09-28). Pin/address assignment is a proposal only;
 //                confirm with wirefind once it's connected, and bench-verify
-//                BOTTOM_PRESENT_MM/TOP_PRESENT_MM/LYING_CONFIRM_MS below
+//                LYING_NOTCH_MAX_MM/LYING_TOP_MAX_MM/LYING_CONFIRM_MS below
 //                before trusting them on the robot.
 // ============================================================================
 
@@ -503,18 +503,27 @@ const unsigned long REJECT_SUPPRESS_MS = 4000;   // ignore that spot for this lo
 // is still arriving, not a fixed timeout that can't tell "still arriving"
 // from "lying down". LYING_CONFIRM_MS is deliberately long (patience over
 // speed) - see navigation.cpp lyingWeightConfirmed().
-//   BOTTOM_PRESENT_MM is deliberately wider than FUNNEL_PRESENT_MM (66) -
-//   that one was tuned tight around steel-upright only for telemetry.
-//   Bench data has dummy-upright at 70-74mm and the 28/9 replacement-sensor
-//   lying-weight test at 110-149mm (vs empty 196-220mm in that same test);
-//   this needs to count all of those as "something's there".
-// TODO(verify): all four values are starting points from stack_test.cpp's
-// bench/arena testing, not yet re-validated in a full round on this build -
-// live-tune with nav_main's 'rev'/'turn'/'disc'/'lconf' serial commands.
-const int BOTTOM_PRESENT_MM = 160;
-const int TOP_PRESENT_MM    = 150;   // was 80 (placeholder) - matches stack_test's bench-derived STACK_TOP_MAX_MM
-const int LYING_DISCREPANCY_MM = 40;   // |bottom_mm - top_mm| above this = mismatch (secondary signal)
-const unsigned long LYING_CONFIRM_MS = 1500;   // was 100 - too short, rejected real weights still arriving
+//
+// 2026-09-29 (integration): nav now runs the check EXACTLY as stack_test.cpp
+// does - these constants are the single source for both (the STACK_* ones at
+// the end of this file are aliases of them):
+//   - "present" = 0 < mm < ceiling for BOTH sensors. 0 is "nothing in range",
+//     never "present"; the ceiling rejects far-field returns (both are long-
+//     range L1X - on open floor the notch locked onto the far wall and fired
+//     REJECT while just driving forward, 29/9 arena).
+//   - the mismatch timer runs every loop, not only while it's being asked.
+//   - it is only acted on in CREEP, which starts once the notch ToF sees
+//     something (or the bottom pair loses a close candidate, as before).
+//   - once the notch has seen something, CREEP gets CREEP_HARD_CAP_MS (not
+//     CREEP_MAX_MS) - the patience window has to fit inside it.
+// TODO(verify): starting points from stack_test.cpp's bench/arena testing -
+// live-tune with nav_main's ':disc'/':lconf'/':ccap'/':rev'/':turn'.
+const int LYING_NOTCH_MAX_MM   = 150;  // notch (TOF_UPRIGHT) presence ceiling. Upright 59, dummy 70-74, lying 110-149 (28/9)
+const int LYING_TOP_MAX_MM     = 150;  // top (TOF_TOP) presence ceiling
+const int LYING_DISCREPANCY_MM = 40;   // |notch_mm - top_mm| above this = mismatch (secondary signal)
+const unsigned long LYING_CONFIRM_MS  = 1500;  // was 100 - too short, rejected real weights still arriving
+const unsigned long CREEP_HARD_CAP_MS = 8000;  // CREEP give-up once the notch has seen something
+const unsigned long NOTCH_IGNORE_MS   = REJECT_SUPPRESS_MS;  // after a REJECT, the notch can't restart CREEP for this long
 
 // ---------------------------------------------------------------------------
 // PD STEERING for APPROACH (mm imbalance -> % differential)
@@ -656,8 +665,9 @@ const int STACK_SEARCH_ARC_PCT   = 16;   // matches ONE_SIDE_ARC_PCT's magnitude
 // TODO(verify): starting point from the bench data in the geometry comment
 // above (matched cases read 60-110mm, lying up to ~130mm) - retune on the
 // arena floor with 'h'/'i'.
-const int STACK_NOTCH_MAX_MM = 150;
-const int STACK_TOP_MAX_MM   = 150;
+// Same values as nav - aliases of the LYING_* constants (one source of truth).
+const int STACK_NOTCH_MAX_MM = LYING_NOTCH_MAX_MM;
+const int STACK_TOP_MAX_MM   = LYING_TOP_MAX_MM;
 
 // Confirm logic: "mismatch" = notch present with top NEVER confirming (the
 // expected lying-weight signature), OR both valid but far apart (a weaker
@@ -669,6 +679,6 @@ const int STACK_TOP_MAX_MM   = 150;
 // telemetry columns, THEN paste the values back here. STACK_MISMATCH_CONFIRM_MS
 // is deliberately long (patience over speed, per team decision 2026-09-28) -
 // it only needs to be shorter than STACK_CREEP_MAX_MS, the hard fallback cap.
-const int STACK_DISCREPANCY_MM = 40;         // |notch_mm - top_mm| above this = mismatch (secondary signal)
-const unsigned long STACK_MISMATCH_CONFIRM_MS = 1500;
-const unsigned long STACK_CREEP_MAX_MS        = 8000;  // hard cap regardless of the above - safety net, not the normal path
+const int STACK_DISCREPANCY_MM = LYING_DISCREPANCY_MM;          // |notch_mm - top_mm| above this = mismatch (secondary signal)
+const unsigned long STACK_MISMATCH_CONFIRM_MS = LYING_CONFIRM_MS;
+const unsigned long STACK_CREEP_MAX_MS        = CREEP_HARD_CAP_MS;  // hard cap regardless of the above - safety net, not the normal path

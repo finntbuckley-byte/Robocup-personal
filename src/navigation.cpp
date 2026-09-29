@@ -37,8 +37,12 @@
 //      APPROACH  steer on the bottom ToF pair (PD when both see it, else a
 //                one-sided arc). They see a weight from ~14cm out but lose it
 //                as it enters the notch, so:
-//      CREEP     weight lost while close (< CREEP_START_MM) -> creep
-//                straight through the blind gap for up to CREEP_MAX_MS.
+//      CREEP     weight lost while close (< CREEP_START_MM), or the notch ToF
+//                sees something (FORWARD/APPROACH - stack_test's SEARCH ->
+//                CREEP) -> creep straight. Blind gap (notch hasn't seen
+//                anything): up to CREEP_MAX_MS. Once the notch has seen it:
+//                up to navTuning().creepCapMs, back to FORWARD if it leaves
+//                the notch's view.
 //      PICKUP    inductive reads metal (debounced) in APPROACH or CREEP ->
 //                STOP, run the crane, hold while collection_busy(). After the
 //                cycle: metal GONE from the notch = success (noteCollected);
@@ -48,10 +52,9 @@
 //                tunable - see navTuning()): (1) CREEP times out with no
 //                metal ever seen (dummy/nothing). (2) lyingWeightConfirmed()
 //                (notch ToF sees something but the baseplate-top ToF never
-//                confirms, held patiently - checked in FORWARD/APPROACH/
-//                CREEP), RE-ENABLED 2026-09-29 (USE_LYING_WEIGHT_REJECT in
-//                config.h) with logic ported from stack_test.cpp's
-//                bench/arena-tested version - see BENCH_TODO.md 2h. Neither
+//                confirms, held patiently - acted on in CREEP only), same
+//                logic as stack_test.cpp (USE_LYING_WEIGHT_REJECT in
+//                config.h, BENCH_TODO.md 2h/2i). Neither
 //                is gated on the inductive sensor - that's PICKUP-only now
 //                (metalConfirmed()).
 //      REPOSITION  after a pickup, turn away from the spot, then resume.
@@ -101,11 +104,14 @@ static int  rejectDir = 1;
 static int  rejectCount = 0;
 static unsigned long metalSince = 0;
 #if USE_LYING_WEIGHT_REJECT
-static unsigned long lyingSince = 0;
+static unsigned long lyingSince = 0;        // mismatch start (0 = none) - updated EVERY loop
+static bool creepNotchSeen = false;         // this CREEP has had the notch ToF see something
+static unsigned long notchIgnoreUntil = 0;  // after a REJECT: notch can't restart CREEP until then
 #endif
 
 static NavTuning tuning = { REJECT_REVERSE_MS, REPOSITION_TURN_MS,
-                             LYING_DISCREPANCY_MM, LYING_CONFIRM_MS };
+                             LYING_DISCREPANCY_MM, LYING_CONFIRM_MS,
+                             CREEP_HARD_CAP_MS };
 NavTuning &navTuning() { return tuning; }
 
 static void setMode(int m) { mode = m; modeStart = millis(); }
@@ -156,26 +162,35 @@ static int roomierSide();
 // fires, rather than treating "no sensor" as "definitely lying down" -
 // that's what caused real weights to get rejected before.
 //
-// RE-ENABLED 2026-09-29 (USE_LYING_WEIGHT_REJECT in config.h) with this
-// logic ported from stack_test.cpp's bench/arena-tested version - see
-// BENCH_TODO.md 2h. Tune live with nav_main's 'disc'/'lconf' commands.
+// RE-ENABLED 2026-09-29 (USE_LYING_WEIGHT_REJECT in config.h). 2026-09-29
+// integration: now matches stack_test.cpp line for line - 0 < mm < ceiling
+// presence (0 = nothing, far-field = nothing), the timer updated every loop
+// by updateLyingMismatch() (it went stale between the modes that asked
+// before), and only acted on in CREEP. Tune live with ':disc'/':lconf'.
+static bool notchPresent() { return tofOk(TOF_UPRIGHT) && tofUpright > 0 && tofUpright < LYING_NOTCH_MAX_MM; }
+static bool topPresent()   { return tofOk(TOF_TOP)     && tofTop     > 0 && tofTop     < LYING_TOP_MAX_MM; }
+
+// call once per navigationUpdate(), whatever the mode
+static void updateLyingMismatch()
+{
+  // a sensor that isn't up (unfitted/stale/recovering) never counts as "lying"
+  if (!tofOk(TOF_TOP) || !tofOk(TOF_UPRIGHT)) { lyingSince = 0; return; }
+
+  bool np = notchPresent(), tp = topPresent();
+  int diff = (np && tp) ? abs((int)tofUpright - (int)tofTop) : -1;
+  bool mismatchNow = np && (!tp || diff > tuning.lyingDiscrepancyMm);
+
+  if (!mismatchNow)        lyingSince = 0;
+  else if (lyingSince == 0) lyingSince = millis();
+}
+
 static bool lyingWeightConfirmed()
 {
-  if (!tofOk(TOF_TOP) || !tofOk(TOF_UPRIGHT)) { lyingSince = 0; return false; }
-
-  bool bottomPresent = tofUpright < BOTTOM_PRESENT_MM;
-  bool topPresent    = tofTop     < TOP_PRESENT_MM;
-
-  int diff = (bottomPresent && topPresent) ? (int)tofUpright - (int)tofTop : -1;
-  if (diff < 0 && bottomPresent && topPresent) diff = -diff;
-
-  bool mismatchNow = bottomPresent && (!topPresent || diff > tuning.lyingDiscrepancyMm);
-
-  if (!mismatchNow) { lyingSince = 0; return false; }
-
-  if (lyingSince == 0) lyingSince = millis();
-  return millis() - lyingSince >= tuning.lyingConfirmMs;
+  return lyingSince != 0 && millis() - lyingSince >= tuning.lyingConfirmMs;
 }
+
+// the notch ToF sees something to creep onto (stack_test: SEARCH -> CREEP)
+static bool notchCandidate() { return notchPresent() && millis() >= notchIgnoreUntil; }
 #endif
 
 int rejectedCount() { return rejectCount; }
@@ -278,6 +293,14 @@ static void startApproach()
   setMode(MODE_APPROACH);
 }
 
+static void startCreep()
+{
+#if USE_LYING_WEIGHT_REJECT
+  creepNotchSeen = notchPresent();
+#endif
+  setMode(MODE_CREEP);
+}
+
 static void startPickup()
 {
   repositionDir = (lastWeightSide < 0) ? +1 : -1;   // peel away from its side
@@ -294,6 +317,10 @@ static void startReject(const char *why)
   rejectDir = (lastWeightSide < 0) ? +1 : -1;
   Serial.print(">>> REJECT #"); Serial.print(rejectCount);
   Serial.print(" - "); Serial.println(why);
+#if USE_LYING_WEIGHT_REJECT
+  // the object may still be in view of the notch after the pivot - don't creep straight back onto it
+  notchIgnoreUntil = millis() + tuning.rejectReverseMs + tuning.repositionTurnMs + NOTCH_IGNORE_MS;
+#endif
   setMode(MODE_REJECT);
 }
 
@@ -323,6 +350,9 @@ void navigationUpdate()
 {
   unsigned long held = millis() - modeStart;
   bool wantWeights = roundWantsWeights();
+#if USE_LYING_WEIGHT_REJECT
+  updateLyingMismatch();   // every loop, like stack_test - never a stale timer
+#endif
 
   // IMU HOOK: once the IMU is back, roundWantsHome() is where a RETURN_HOME
   // mode takes over - heading back toward the start corner (heading zeroed at
@@ -338,9 +368,6 @@ void navigationUpdate()
     {
       // a weight can end up in the notch without an approach (drove into it)
       if (wantWeights && metalConfirmed()) { pickupTries = 0; lastWeightSide = 0; startPickup(); }
-#if USE_LYING_WEIGHT_REJECT
-      else if (wantWeights && lyingWeightConfirmed()) startReject("lying weight (top/bottom ToF)");
-#endif
       else if (obstacleLeft() && obstacleRight())
       {
         escapeSpinDir = roomierSide();
@@ -349,6 +376,9 @@ void navigationUpdate()
       }
       else if (obstacleLeft())  requestTurn(+1);
       else if (obstacleRight()) requestTurn(-1);
+#if USE_LYING_WEIGHT_REJECT
+      else if (wantWeights && notchCandidate()) { lastWeightSide = 0; startCreep(); }   // something at the notch
+#endif
       else if (wantWeights && weightFound) startApproach();
 #if USE_SCAN
       // IMU HOOK: with a heading reference, this could scan a bounded sweep
@@ -421,7 +451,7 @@ void navigationUpdate()
 
       if (metalConfirmed()) { pickupTries = 0; startPickup(); break; }
 #if USE_LYING_WEIGHT_REJECT
-      if (lyingWeightConfirmed()) { startReject("lying weight (top/bottom ToF)"); break; }
+      if (notchCandidate()) { startCreep(); break; }   // reached the notch - creep + confirm (stack_test)
 #endif
 
       if (odomStalled() && held > APPROACH_PROGRESS_MS) { abandonApproach("tracks stalled"); break; }
@@ -446,7 +476,7 @@ void navigationUpdate()
       }
       else if (lastWeightDist > 0 && lastWeightDist < CREEP_START_MM)
       {
-        setMode(MODE_CREEP);            // lost it at the notch mouth - creep through the blind gap
+        startCreep();                   // lost it at the notch mouth - creep through the blind gap
       }
       else if (held > 400)
         setMode(MODE_FORWARD);          // lost it far out - give up
@@ -456,12 +486,24 @@ void navigationUpdate()
     case MODE_CREEP:
       if (avoidIfBlocked()) break;
       if (!wantWeights) { setMode(MODE_FORWARD); break; }
-      if (metalConfirmed()) { pickupTries = 0; startPickup(); }
+      if (metalConfirmed()) { pickupTries = 0; startPickup(); break; }
 #if USE_LYING_WEIGHT_REJECT
-      else if (lyingWeightConfirmed()) startReject("lying weight (top/bottom ToF)");
+      // same order as stack_test's CREEP: metal wins, then a confirmed
+      // mismatch, then the candidate leaving, then the hard cap. No
+      // re-acquire -> APPROACH once the notch has it: APPROACH would hand
+      // straight back to CREEP and restart the cap every bounce.
+      if (notchPresent()) creepNotchSeen = true;
+      if (lyingWeightConfirmed()) { startReject("lying weight - notch sees it, top never did"); break; }
+      if (creepNotchSeen)
+      {
+        if (!notchPresent()) { lastFindOrEvent = millis(); setMode(MODE_FORWARD); break; }   // left the notch FoV
+        if (held > tuning.creepCapMs) startReject("creep hard cap - no metal (dummy?)");
+        break;
+      }
 #endif
-      else if (weightFound && weightDistMM >= CREEP_START_MM) startApproach();   // re-acquired further out
-      else if (held > CREEP_MAX_MS) startReject("no metal at the notch (dummy / lying weight / nothing)");
+      // blind gap - notch hasn't seen anything yet
+      if (weightFound && weightDistMM >= CREEP_START_MM) { startApproach(); break; }   // re-acquired further out
+      if (held > CREEP_MAX_MS) startReject("no metal at the notch (dummy / lying weight / nothing)");
       break;
 
     case MODE_PICKUP:

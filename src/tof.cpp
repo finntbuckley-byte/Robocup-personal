@@ -117,6 +117,8 @@ static bool setupSensor(int i)
       l1x[i].setAddress(TOF_ADDRESS_START + i);
       l1x[i].setDistanceMode(TOF_SHORT_MODE[i] ? VL53L1X::Short : VL53L1X::Long);
       l1x[i].setMeasurementTimingBudget(TOF_L1X_BUDGET_US);
+      // top: narrowed cone, same as stack_test.cpp (full 16x16 sees floor/clutter)
+      if (i == TOF_TOP && STACK_TOP_ROI < 16) l1x[i].setROISize(STACK_TOP_ROI, STACK_TOP_ROI);
       l1x[i].startContinuous(TOF_PERIOD_MS);
     }
   }
