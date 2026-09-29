@@ -1,6 +1,8 @@
-// stack_test.cpp - BENCH RIG (robot is off its tracks - drive commands are
-// issued and logged, but nothing will physically move; watch the state
-// prints and the drv_l/drv_r telemetry columns instead).
+// stack_test.cpp - floor/bench test rig. Drive commands are real (the robot
+// moves if it's on the floor; on blocks/off its tracks, nothing will
+// physically move but the state prints and drv_l/drv_r telemetry still show
+// intent). Runs the REAL collection.cpp crane FSM in PICKUP - no copied
+// timings.
 //
 // SEARCH  drive forward, arc toward whichever outer weight-search ToF sees
 //         something within range. -> CREEP once the underside notch ToF
@@ -11,6 +13,9 @@
 //         separate "matched, go pick it up" branch here.
 // (any state) INDUCTIVE OVERRIDE - the instant it reads metal, everything
 //         else is skipped and collection starts immediately.
+// PICKUP  runs the real crane. A missed grab (metal still at the notch)
+//         retries in place up to MAX_PICKUP_TRIES before giving up, same as
+//         the main nav build.
 // REVERSE reverse + pivot, then back to SEARCH for the next candidate.
 //
 // Serial: x = stop now | r = re-arm (from WAIT/DONE) | s = print settings
@@ -57,6 +62,7 @@ static TofL0 searchL, searchR;    // L0X pair - outer weight search
 enum State { ST_WAIT, ST_SEARCH, ST_CREEP, ST_REVERSE, ST_SETTLE, ST_PICKUP, ST_DONE };
 static State state = ST_WAIT;
 static unsigned long stateMs = 0;
+static int pickupTries = 0;   // this approach's attempt count - reset fresh each SETTLE->PICKUP
 
 // runtime-tunable (start from config.h) - see header comment for meaning
 static int dMax           = STACK_DISCREPANCY_MM;
@@ -215,8 +221,8 @@ void setup() {
   pinMode(PIN_INDUCTIVE, INPUT);
   if (PIN_GO >= 0) pinMode(PIN_GO, INPUT);
 
-  Serial.println("\n!! BENCH RIG - robot is off its tracks, it will NOT move.");
-  Serial.println("!! Drive commands are still issued/logged - watch drv_l/drv_r and the state prints.\n");
+  Serial.println("\n!! Drive commands are real - the robot WILL move if it's on the floor.");
+  Serial.println("!! Watch the state-change prints and drv_l/drv_r telemetry to follow along.\n");
 
   // all XSHUT low first; anything not brought up here stays in shutdown
   bool sx = sxWrite(SX_REG_DATA_A, 0x00) && sxWrite(SX_REG_DIR_A, 0x00);
@@ -314,15 +320,37 @@ void loop() {
 
     case ST_SETTLE:   // soft stop ramps down; crane only starts once it has finished
       hwSoftStop();
-      if (held >= DRIVE_DECEL_MS + 100) { hwPickupStart(); setState(ST_PICKUP, "crane start"); }
+      if (held >= DRIVE_DECEL_MS + 100) {
+        pickupTries = 1;
+        hwPickupStart();
+        setState(ST_PICKUP, "crane start");
+      }
       break;
 
     case ST_PICKUP:
       hwSoftStop();   // keeps the tracks held at zero while the crane runs
       // 100 ms guard: busy may only go true after the next collection_update()
       if ((held > 100 && !hwPickupBusy()) || held > PICKUP_TIMEOUT_MS) {
-        Serial.println(metal ? ">>> metal STILL at notch - grab missed" : ">>> metal gone - grab ok");
-        setState(ST_SEARCH, "pickup finished - resuming search");
+        bool timedOut   = held > PICKUP_TIMEOUT_MS;
+        bool stillThere = metal;   // metal still at the notch = the grab missed
+
+        Serial.print(">>> pickup try "); Serial.print(pickupTries); Serial.print('/'); Serial.print(MAX_PICKUP_TRIES);
+        Serial.print(" - ");
+        if (timedOut)        Serial.println("TIMED OUT waiting for crane");
+        else if (stillThere) Serial.println("MISSED - metal still at the notch");
+        else                 Serial.println("OK - metal gone, collected");
+
+        // matches the main nav build's MAX_PICKUP_TRIES retry - a missed
+        // grab tries again in place instead of abandoning a real weight
+        // that's still sitting right there
+        if (!timedOut && stillThere && pickupTries < MAX_PICKUP_TRIES) {
+          Serial.println(">>> retrying pickup");
+          pickupTries++;
+          hwPickupStart();
+          stateMs = now;   // restart the settle/timeout clock for this retry, stay in ST_PICKUP
+        } else {
+          setState(ST_SEARCH, "pickup finished - resuming search");
+        }
       }
       break;
   }
