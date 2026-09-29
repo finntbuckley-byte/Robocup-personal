@@ -534,7 +534,7 @@ const unsigned long TARGET_SUPPRESS_MS = 1500;
 // All six can be changed live on the bench: pio run -e servotest (see
 // servo_test.cpp), then paste the printed values back here.
 // ---------------------------------------------------------------------------
-const int   CRANE_PICKUP_ANGLE = 122;   // confirmed with a weight 2026-09-25 (less stall than 120, which is the fallback)
+const int   CRANE_PICKUP_ANGLE = 118;   // confirmed with a weight 2026-09-25 (less stall than 120, which is the fallback)
 const float CRANE_PICKUP_DPS   = 45.0f;
 const int   CRANE_DROP_ANGLE   = 40;
 const float CRANE_DROP_DPS     = 60.0f;
