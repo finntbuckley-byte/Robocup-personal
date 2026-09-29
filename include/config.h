@@ -637,6 +637,20 @@ const int STACK_SEARCH_MAX_MM    = 300;
 const int STACK_SEARCH_SPEED_PCT = 40;
 const int STACK_SEARCH_ARC_PCT   = 16;   // matches ONE_SIDE_ARC_PCT's magnitude
 
+// Presence ceilings for notch/top (2026-09-29 arena test finding): both are
+// long-range-capable L1X sensors, so "mm > 0" alone isn't "something's at
+// the notch" - on open floor notch was locking onto the far wall/bare floor
+// at real, valid, non-zero distances, reading as a permanent false
+// "present", which then mismatched against top (correctly seeing nothing)
+// and fired REVERSE while just driving forward. A ceiling rejects any
+// return beyond plausible notch/top range as "nothing", same as the earlier
+// funnel/BOTTOM_PRESENT_MM-style thresholds elsewhere in this project.
+// TODO(verify): starting point from the bench data in the geometry comment
+// above (matched cases read 60-110mm, lying up to ~130mm) - retune on the
+// arena floor with 'h'/'i'.
+const int STACK_NOTCH_MAX_MM = 150;
+const int STACK_TOP_MAX_MM   = 150;
+
 // Confirm logic: "mismatch" = notch present with top NEVER confirming (the
 // expected lying-weight signature), OR both valid but far apart (a weaker
 // secondary signal - e.g. a partial/angled top return). Either resets to

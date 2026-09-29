@@ -21,6 +21,7 @@
 // Serial: x = stop now | r = re-arm (from WAIT/DONE) | s = print settings
 //         e<mm> max |notch-top| to still count as agreement (secondary signal)
 //         f<ms> mismatch confirm time | g<mm> search range
+//         h<mm> notch presence ceiling | i<mm> top presence ceiling
 // Standalone test module: does NOT touch tof.cpp / navigation.cpp.
 #include <Arduino.h>
 #include <Wire.h>
@@ -68,6 +69,8 @@ static int pickupTries = 0;   // this approach's attempt count - reset fresh eac
 static int dMax           = STACK_DISCREPANCY_MM;
 static unsigned long mismatchMs = STACK_MISMATCH_CONFIRM_MS;
 static int searchMaxMm    = STACK_SEARCH_MAX_MM;
+static int notchMaxMm     = STACK_NOTCH_MAX_MM;
+static int topMaxMm       = STACK_TOP_MAX_MM;
 
 static const char* stateName(State s) {
   switch (s) {
@@ -189,6 +192,8 @@ static bool goEdge(unsigned long now) {
 static void printSettings() {
   Serial.print("discrepancy max "); Serial.print(dMax); Serial.print("mm, mismatch confirm ");
   Serial.print(mismatchMs); Serial.print("ms, search range "); Serial.print(searchMaxMm); Serial.println("mm");
+  Serial.print("notch max "); Serial.print(notchMaxMm); Serial.print("mm, top max ");
+  Serial.print(topMaxMm); Serial.println("mm (presence ceilings - reject far-field returns)");
 }
 
 static void handleSerial() {
@@ -206,6 +211,8 @@ static void handleSerial() {
       case 'e': dMax = v; break;
       case 'f': mismatchMs = v; break;
       case 'g': searchMaxMm = v; break;
+      case 'h': notchMaxMm = v; break;
+      case 'i': topMaxMm = v; break;
       default: continue;
     }
     printSettings();
@@ -255,8 +262,12 @@ void loop() {
   bool metal = inductiveMetal(now);
   bool go    = goEdge(now);
 
-  bool notchPresent = notch.mm > 0;
-  bool topPresent   = top.mm > 0;
+  // both are long-range-capable L1X sensors - a bare "mm > 0" latches onto
+  // the far wall/bare floor on open ground, so a ceiling is required to
+  // treat that as "nothing" rather than a permanent false presence (2026-09-29
+  // arena finding: this fired REVERSE while just driving forward)
+  bool notchPresent = notch.mm > 0 && notch.mm < notchMaxMm;
+  bool topPresent   = top.mm   > 0 && top.mm   < topMaxMm;
   int  diff = (notchPresent && topPresent) ? (int)notch.mm - (int)top.mm : -1;
   if (diff < 0 && notchPresent && topPresent) diff = -diff;
 
