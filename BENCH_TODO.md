@@ -3,6 +3,13 @@
 Work top to bottom. 🤖 = Claude can do it from the laptop once the Teensy is plugged in (with a
 **data** USB cable).
 
+## PRIORITY 1 — integrate with working navigation software
+- [ ] PID
+- [ ] Collection
+- [ ] Homing
+- [ ] Gate function
+- [ ] stack_test (do last)
+
 ## 0. Next session (from 27–28/9 late, plus 29/9 plan)
 - [ ] **Lying-weight reject:** now wired back into `nav` (`USE_LYING_WEIGHT_REJECT` in `config.h`)
       with logic ported from `stack_test.cpp` - see §2e for the integration/tuning task.
