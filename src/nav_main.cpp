@@ -122,6 +122,17 @@ static void i2cScan()
   }
 }          // 'x' on the serial menu - bench safety only
 
+static void printNavTuning()
+{
+  NavTuning &t = navTuning();
+  Serial.println("--- nav tuning (live - not saved across a reflash) ---");
+  Serial.print("  rev   (reject reverse)      = "); Serial.print(t.rejectReverseMs);   Serial.println(" ms");
+  Serial.print("  turn  (reject/reposition pivot) = "); Serial.print(t.repositionTurnMs); Serial.println(" ms");
+  Serial.print("  disc  (lying discrepancy max)   = "); Serial.print(t.lyingDiscrepancyMm); Serial.println(" mm");
+  Serial.print("  lconf (lying confirm window)    = "); Serial.print(t.lyingConfirmMs); Serial.println(" ms");
+  Serial.println("paste-ready for config.h: REJECT_REVERSE_MS / REPOSITION_TURN_MS / LYING_DISCREPANCY_MM / LYING_CONFIRM_MS");
+}
+
 static void printHelp()
 {
   Serial.println("\n=========== nav build ===========");
@@ -131,6 +142,11 @@ static void printHelp()
   Serial.println(" i  I2C scan of Wire and Wire1");
   Serial.println(" t  telemetry on/off");
   Serial.println(" x  KILL - stop motors until reset");
+  Serial.println(" nt  print live nav tuning (reverse/turn/lying-reject timings)");
+  Serial.println(" rev <ms>    set reject reverse duration   (e.g. 'rev 500')");
+  Serial.println(" turn <ms>   set reject/reposition pivot duration (e.g. 'turn 700')");
+  Serial.println(" disc <mm>   set lying-weight discrepancy max (e.g. 'disc 40')");
+  Serial.println(" lconf <ms>  set lying-weight confirm window (e.g. 'lconf 1500')");
   if (GO_STOPS_ROUND) Serial.println(" GO pressed again during a round = STOP (testing; off for competition)");
   Serial.println("=================================");
 }
@@ -195,20 +211,44 @@ static void printTelemetry()
   else             { Serial.println("-\t-"); }
 }
 
+// Multi-char commands ("rev 500") for live nav tuning, plus every legacy
+// single-char command unchanged. One line in (same convention as
+// encoder_test.cpp), so "rev 500\n" isn't split across two reads the way
+// single-char parsing would mangle it.
 static void handleSerial()
 {
   if (!Serial.available()) return;
-  char c = Serial.read();
-  while (Serial.available()) Serial.read();
-  switch (c)
+  String line = Serial.readStringUntil('\n');
+  line.trim();
+  if (line.length() == 0) return;
+
+  int sp = line.indexOf(' ');
+  String key = sp < 0 ? line : line.substring(0, sp);
+  String arg = sp < 0 ? "" : line.substring(sp + 1);
+  String keyLower = key; keyLower.toLowerCase();
+
+  if (keyLower == "rev" && arg.length())
+  { navTuning().rejectReverseMs = (unsigned long)arg.toInt(); printNavTuning(); return; }
+  if (keyLower == "turn" && arg.length())
+  { navTuning().repositionTurnMs = (unsigned long)arg.toInt(); printNavTuning(); return; }
+  if (keyLower == "disc" && arg.length())
+  { navTuning().lyingDiscrepancyMm = arg.toInt(); printNavTuning(); return; }
+  if (keyLower == "lconf" && arg.length())
+  { navTuning().lyingConfirmMs = (unsigned long)arg.toInt(); printNavTuning(); return; }
+  if (keyLower == "nt") { printNavTuning(); return; }
+
+  if (line.length() == 1)
   {
-    case '?': printHelp(); break;
-    case 'g': x8PrintGrid(); break;
-    case 'u': tofPrintRaw(); break;
-    case 'i': i2cScan(); probeTofs("now"); break;
-    case 't': telemetryOn = !telemetryOn; if (telemetryOn) printTelemetryHeader(); break;
-    case 'x': killed = true; driveHardStop(); Serial.println("!!! KILLED - reset to run again"); break;
-    default: break;
+    switch (line[0])
+    {
+      case '?': printHelp(); return;
+      case 'g': x8PrintGrid(); return;
+      case 'u': tofPrintRaw(); return;
+      case 'i': i2cScan(); probeTofs("now"); return;
+      case 't': telemetryOn = !telemetryOn; if (telemetryOn) printTelemetryHeader(); return;
+      case 'x': killed = true; driveHardStop(); Serial.println("!!! KILLED - reset to run again"); return;
+      default: break;
+    }
   }
 }
 
@@ -238,6 +278,7 @@ void setup()
   roundInit();
 
   printHelp();
+  printNavTuning();
   printTelemetryHeader();
 }
 

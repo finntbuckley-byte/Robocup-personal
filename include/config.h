@@ -67,12 +67,12 @@
 #define USE_SIDE_IR     1
 #define USE_FUNNEL_SORT 1     // funnel ToF + inductive classification
 #define USE_SCAN        1
-// DISABLED 2026-09-28: arena testing found the top/bottom lying-weight
-// reject (navigation.cpp lyingWeightConfirmed()) isn't working as intended.
-// Sensor reading + the function itself stay in - only the FSM trigger is
-// switched off - so this can be picked back up without re-deriving it.
-// See BENCH_TODO.md 2g.
-#define USE_LYING_WEIGHT_REJECT 0
+// RE-ENABLED 2026-09-29: was disabled 2026-09-28 (arena testing found the
+// original top/bottom lying-weight reject wasn't working). navigation.cpp
+// lyingWeightConfirmed() has since been rewritten around the patient,
+// discrepancy-based logic proven out in stack_test.cpp/BENCH_TODO.md 2h -
+// integrating it into the nav build for a full round simulation test.
+#define USE_LYING_WEIGHT_REJECT 1
 
 // ---------------------------------------------------------------------------
 // ROBOT GEOMETRY  (mm)
@@ -493,20 +493,28 @@ const unsigned long REJECT_SUPPRESS_MS = 4000;   // ignore that spot for this lo
 // instead of being inferred from how a distance changed over time, which is
 // what was causing real upright weights to get rejected too quickly.
 //
-// TODO(verify): NEITHER threshold has bench data yet - TOF_TOP doesn't
-// exist on the robot as of 2026-09-28. Once it's wired, characterise both
-// the same way FUNNEL_PRESENT_MM was: log raw mm for steel upright, plastic
-// upright, a lying weight, and empty, then set the thresholds from that.
+// 2026-09-29: rewritten to match the patient, discrepancy-based logic
+// proven out in stack_test.cpp (BENCH_TODO.md 2h) rather than the original
+// simple "both within a fixed band" check. Mismatch = bottom present with
+// top NEVER confirming (the real lying-weight signature - top only ever
+// sees an UPRIGHT weight's top edge), OR both valid but far apart
+// (LYING_DISCREPANCY_MM, a weaker secondary signal). Either resets the
+// instant top gets ANY valid reading - that's active evidence the weight
+// is still arriving, not a fixed timeout that can't tell "still arriving"
+// from "lying down". LYING_CONFIRM_MS is deliberately long (patience over
+// speed) - see navigation.cpp lyingWeightConfirmed().
 //   BOTTOM_PRESENT_MM is deliberately wider than FUNNEL_PRESENT_MM (66) -
 //   that one was tuned tight around steel-upright only for telemetry.
 //   Bench data has dummy-upright at 70-74mm and the 28/9 replacement-sensor
 //   lying-weight test at 110-149mm (vs empty 196-220mm in that same test);
 //   this needs to count all of those as "something's there".
-//   TOP_PRESENT_MM is a placeholder - pick a real value once you know the
-//   sensor's mounting height above the baseplate.
+// TODO(verify): all four values are starting points from stack_test.cpp's
+// bench/arena testing, not yet re-validated in a full round on this build -
+// live-tune with nav_main's 'rev'/'turn'/'disc'/'lconf' serial commands.
 const int BOTTOM_PRESENT_MM = 160;
-const int TOP_PRESENT_MM    = 80;
-const unsigned long LYING_CONFIRM_MS = 100;   // must read this way steadily before rejecting
+const int TOP_PRESENT_MM    = 150;   // was 80 (placeholder) - matches stack_test's bench-derived STACK_TOP_MAX_MM
+const int LYING_DISCREPANCY_MM = 40;   // |bottom_mm - top_mm| above this = mismatch (secondary signal)
+const unsigned long LYING_CONFIRM_MS = 1500;   // was 100 - too short, rejected real weights still arriving
 
 // ---------------------------------------------------------------------------
 // PD STEERING for APPROACH (mm imbalance -> % differential)

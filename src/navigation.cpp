@@ -44,16 +44,16 @@
 //                cycle: metal GONE from the notch = success (noteCollected);
 //                metal STILL there = the grab missed -> retry up to
 //                MAX_PICKUP_TRIES, then give up.
-//      REJECT    CREEP times out with no metal ever seen (dummy/nothing) ->
-//                reverse REJECT_REVERSE_MS, pivot away, suppress the spot.
-//                No longer gated on the inductive sensor - that's PICKUP-only
-//                now (metalConfirmed()).
-//                A second trigger, lyingWeightConfirmed() (notch ToF sees
-//                something but the baseplate-top ToF doesn't - checked in
-//                FORWARD/APPROACH/CREEP so a lying weight is caught as soon
-//                as it's seen), exists but is DISABLED 2026-09-28
-//                (USE_LYING_WEIGHT_REJECT in config.h) - arena testing found
-//                it isn't working. See BENCH_TODO.md 2g.
+//      REJECT    Two triggers, same reverse/pivot/suppress (timings now live-
+//                tunable - see navTuning()): (1) CREEP times out with no
+//                metal ever seen (dummy/nothing). (2) lyingWeightConfirmed()
+//                (notch ToF sees something but the baseplate-top ToF never
+//                confirms, held patiently - checked in FORWARD/APPROACH/
+//                CREEP), RE-ENABLED 2026-09-29 (USE_LYING_WEIGHT_REJECT in
+//                config.h) with logic ported from stack_test.cpp's
+//                bench/arena-tested version - see BENCH_TODO.md 2h. Neither
+//                is gated on the inductive sensor - that's PICKUP-only now
+//                (metalConfirmed()).
 //      REPOSITION  after a pickup, turn away from the spot, then resume.
 //
 //  ROUND (round.h): weights are only approached while roundWantsWeights() -
@@ -104,6 +104,10 @@ static unsigned long metalSince = 0;
 static unsigned long lyingSince = 0;
 #endif
 
+static NavTuning tuning = { REJECT_REVERSE_MS, REPOSITION_TURN_MS,
+                             LYING_DISCREPANCY_MM, LYING_CONFIRM_MS };
+NavTuning &navTuning() { return tuning; }
+
 static void setMode(int m) { mode = m; modeStart = millis(); }
 
 static float holdTarget = 0;         // heading FORWARD is holding (imu.h: + = right)
@@ -137,28 +141,40 @@ static bool metalConfirmed()
 static int roomierSide();
 
 #if USE_LYING_WEIGHT_REJECT
-// TOF_TOP (baseplate-top, proposed - see config.h) is bench-confirmed blind
-// to a weight lying on its side; TOF_UPRIGHT (the notch ToF) still sees it.
-// So bottom-sees-something + top-sees-nothing, held steadily, means "an
-// object is here but not standing up" - reject it before creeping it
-// through the funnel. If the top sensor isn't up (not yet fitted, stale,
-// mid-recovery) this never fires, rather than treating "no top sensor" as
-// "definitely lying down" - that's what caused real weights to get rejected
-// before this sensor existed.
+// TOF_TOP (baseplate-top - see config.h) is bench-confirmed blind to a
+// weight lying on its side; TOF_UPRIGHT (the notch ToF) still sees it. So
+// bottom-sees-something + top-sees-nothing means "an object is here but
+// not standing up" - but top only sees an UPRIGHT weight once it's nearly
+// fully seated, so "bottom present, top absent" is also the NORMAL state
+// for most of a real weight's approach. A fixed short timeout can't tell
+// "still arriving" from "lying down" - only patience can: this resets the
+// instant top gets ANY valid reading (active evidence of arrival), and
+// only confirms a mismatch after it's stayed unresolved for
+// navTuning().lyingConfirmMs. A secondary numeric check (both valid but
+// >lyingDiscrepancyMm apart) catches a partial/angled top return. If
+// either sensor isn't up (not fitted, stale, mid-recovery) this never
+// fires, rather than treating "no sensor" as "definitely lying down" -
+// that's what caused real weights to get rejected before.
 //
-// DISABLED 2026-09-28 (USE_LYING_WEIGHT_REJECT in config.h): arena testing
-// found this isn't working as intended. See BENCH_TODO.md 2g.
+// RE-ENABLED 2026-09-29 (USE_LYING_WEIGHT_REJECT in config.h) with this
+// logic ported from stack_test.cpp's bench/arena-tested version - see
+// BENCH_TODO.md 2h. Tune live with nav_main's 'disc'/'lconf' commands.
 static bool lyingWeightConfirmed()
 {
   if (!tofOk(TOF_TOP) || !tofOk(TOF_UPRIGHT)) { lyingSince = 0; return false; }
 
-  bool bottomSees = tofUpright < BOTTOM_PRESENT_MM;
-  bool topSees    = tofTop     < TOP_PRESENT_MM;
+  bool bottomPresent = tofUpright < BOTTOM_PRESENT_MM;
+  bool topPresent    = tofTop     < TOP_PRESENT_MM;
 
-  if (!bottomSees || topSees) { lyingSince = 0; return false; }
+  int diff = (bottomPresent && topPresent) ? (int)tofUpright - (int)tofTop : -1;
+  if (diff < 0 && bottomPresent && topPresent) diff = -diff;
+
+  bool mismatchNow = bottomPresent && (!topPresent || diff > tuning.lyingDiscrepancyMm);
+
+  if (!mismatchNow) { lyingSince = 0; return false; }
 
   if (lyingSince == 0) lyingSince = millis();
-  return millis() - lyingSince >= LYING_CONFIRM_MS;
+  return millis() - lyingSince >= tuning.lyingConfirmMs;
 }
 #endif
 
@@ -500,7 +516,7 @@ void navigationUpdate()
       break;
 
     case MODE_REJECT:
-      if (held > REJECT_REVERSE_MS + REPOSITION_TURN_MS)
+      if (held > tuning.rejectReverseMs + tuning.repositionTurnMs)
       {
         suppressTargetFor(REJECT_SUPPRESS_MS);
         lastFindOrEvent = millis();
@@ -510,7 +526,7 @@ void navigationUpdate()
       break;
 
     case MODE_REPOSITION:
-      if (held > REPOSITION_TURN_MS)
+      if (held > tuning.repositionTurnMs)
         setMode(MODE_FORWARD);
       break;
   }
@@ -586,7 +602,7 @@ void navigationUpdate()
     case MODE_REJECT:
       // back out of the notch (rear guard below still applies), then pivot
       // away so the V-notch wall pushes the dummy aside (option C)
-      if (held < REJECT_REVERSE_MS)
+      if (held < tuning.rejectReverseMs)
         drive(-REJECT_REVERSE_PCT, -REJECT_REVERSE_PCT);
       else
         drive(rejectDir * REPOSITION_SPEED_PCT, -rejectDir * REPOSITION_SPEED_PCT);

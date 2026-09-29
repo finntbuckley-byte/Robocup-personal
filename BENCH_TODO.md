@@ -133,7 +133,7 @@ overshoot, add KI last to kill steady-state drift, then read the settled integra
       drifting for the first second while KI winds up from zero.
 - [ ] Blocked on the flange reprint per §0 before the ruler runs are meaningful.
 
-## 2g. Top/bottom baseplate ToF - lying-weight reject (DISABLED 28/9 - not working, retry planned)
+## 2g. Top/bottom baseplate ToF - lying-weight reject (SUPERSEDED 29/9 - rewritten + re-enabled, see §2i)
 5th ToF (`TOF_TOP`, CON31/XSHUT4, VL53L0X, addr 0x38) pairs with the existing notch ToF
 (`TOF_UPRIGHT`) as "bottom": bottom sees something + top doesn't (bench-confirmed blind to a
 weight on its side) = reject before creeping it in. Replaces the old inductive-gated,
@@ -146,6 +146,11 @@ still misfiring on real ones. **Switched off** (`USE_LYING_WEIGHT_REJECT 0` in `
 robot falls back to the old "ignore lying weights" behaviour while this gets re-worked. The
 sensor reading and `lyingWeightConfirmed()` itself are untouched - only the FSM call sites are
 guarded out - so re-enabling is a one-line flip once it's fixed.
+
+**Status 29/9:** `lyingWeightConfirmed()` was rewritten around the patient, discrepancy-based
+logic proven out on the bench/floor in `stack_test.cpp` (§2h) and **re-enabled**
+(`USE_LYING_WEIGHT_REJECT 1`). The checklist below was written for the original (misfiring)
+version and is kept for reference only - the current status and test plan are in §2i.
 - [ ] **Retry tomorrow.** Before flipping `USE_LYING_WEIGHT_REJECT` back to 1, work out *why* it
       wasn't working - pull `u`/telemetry (`TOP`/`TOPok`) on a real lying weight vs a real upright
       weight and check: is the top sensor actually seeing/not-seeing what's expected at
@@ -198,6 +203,37 @@ telemetry instead of the tracks).
       at any point in any state and confirm the inductive override fires immediately regardless.
 - [ ] Confirm the two new outer weight-search ToFs (L0X, `STACK_XSHUT_SEARCH_L`/`_R`) actually come
       up - this is new hardware bring-up for this file, not yet tested on any board.
+
+## 2i. Lying-weight reject ported into `nav` for full round-sim testing (29/9)
+`lyingWeightConfirmed()` in `navigation.cpp` was rewritten to match the patient/discrepancy logic
+proven out in `stack_test.cpp` (§2h): it resets its confirm timer the instant the top ToF gets ANY
+valid reading (an upright weight legitimately reads bottom-only while it's still creeping into the
+notch), and only fires REJECT after a sustained mismatch window or a large bottom/top distance
+gap. `USE_LYING_WEIGHT_REJECT` is back to 1. `config.h` starting values (all still `TODO(verify)`):
+`TOP_PRESENT_MM` 150 (was the 80 placeholder), `LYING_DISCREPANCY_MM` 40 (new),
+`LYING_CONFIRM_MS` 1500 (was 100 - too short, was rejecting real weights still arriving).
+
+New: reject-reverse duration, reposition/turn duration, the discrepancy threshold and the confirm
+window are all live-tunable in the `nav` env over serial, no reflash needed
+(`NavTuning`/`navTuning()` in `navigation.h`/`.cpp`, mirroring `imu.cpp`'s heading-tuning pattern):
+- `rev <ms>` - reject reverse duration (was `REJECT_REVERSE_MS`)
+- `turn <ms>` - reject/reposition pivot duration (was `REPOSITION_TURN_MS`)
+- `disc <mm>` - lying discrepancy max (was `LYING_DISCREPANCY_MM`)
+- `lconf <ms>` - lying confirm window (was `LYING_CONFIRM_MS`)
+- `nt` - print current tuning values, paste-ready for `config.h`
+
+- [ ] **Full round simulation (bench or floor, tracks on):** run `nav`, place upright weights and
+      confirm none are false-rejected (watch `nt`/telemetry while a weight creeps through the
+      notch - top should resolve before `lconf` elapses). Then a lying weight and confirm REJECT
+      fires within a reasonable time.
+- [ ] **Tune `disc`/`lconf` live during that sim**, then `rev`/`turn` for how far REJECT actually
+      backs off and clears the spot. Once happy, copy the values `nt` prints into `config.h`
+      (`LYING_DISCREPANCY_MM`/`LYING_CONFIRM_MS`/`REJECT_REVERSE_MS`/`REPOSITION_TURN_MS`) so they
+      survive a reflash.
+- [ ] Re-run the §2c pickup-chain bench tests (upright pickup, missed-grab retry, CREEP→REJECT)
+      to confirm the rewrite hasn't disturbed the existing, already-proven pickup path.
+- [ ] Once trusted: re-check §0's original lying-weight bench note (notch ToF side-on 110mm/end-on
+      149mm vs upright 59mm) still holds with the new thresholds.
 
 ## 2d. Third weight carried on the magnet (held at rest, not dropped)
 - [x] Magnet coils **do get hot** in extended use (partner, from earlier testing), so a full-power
