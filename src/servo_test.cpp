@@ -18,7 +18,8 @@
  *      l              loop full cycles until any key
  *      p / d / r      eased move to pickup / drop / rest at its own speed
  *      pa 120         set pickup angle      ps 45   set pickup speed (deg/s)
- *      da 40          set drop angle        ds 60   set drop speed (deg/s)
+ *      da 40          set dr1
+ * op angle        ds 60   set drop speed (deg/s)
  *      ra 70          set rest angle        rs 100  set rest speed (deg/s)
  *      + / -          nudge the arm 1 deg      ++ / --  nudge 5 deg
  *      j 105          eased move to exactly 105 deg
@@ -31,10 +32,12 @@
 
 #include <Arduino.h>
 #include "collection.h"
+#include "config.h"
 
 #define LED_PIN 13
 
-static bool magnetsOn = false;
+static bool magnetsOn  = false;
+static bool goArmed    = false;   // true after GO pressed; inductive triggers a cycle
 
 static void printMenu(void)
 {
@@ -116,9 +119,32 @@ static bool setValue(const String &key, float v)
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// GO-armed inductive trigger
+// ---------------------------------------------------------------------------
+static void checkInductiveTrigger()
+{
+    if (!goArmed || collection_busy()) return;
+
+    static bool     lastMetal    = false;
+    static unsigned long metalAt = 0;
+
+    bool metal = (digitalRead(PIN_INDUCTIVE) == LOW);   // active LOW
+    if (metal && !lastMetal) metalAt = millis();
+    lastMetal = metal;
+
+    if (metal && (millis() - metalAt >= INDUCTIVE_CONFIRM_MS))
+    {
+        Serial.println(F("[inductive] metal - starting cycle"));
+        runCycle();
+    }
+}
+
 void setup()
 {
-    pinMode(LED_PIN, OUTPUT);
+    pinMode(LED_PIN,       OUTPUT);
+    pinMode(PIN_INDUCTIVE, INPUT);
+    pinMode(PIN_GO,        INPUT);   // active HIGH, no pull-up (matches nav)
     Serial.begin(115200);
     unsigned long start = millis();
     while (!Serial && millis() - start < 3000) {}
@@ -126,6 +152,8 @@ void setup()
     collection_init();          // attaches the servo, parks at the rest angle
     collection_magnets(false);
     Serial.println(F("\n[servo_test] booted - crane parked at rest"));
+    Serial.println(F("  Press GO to arm inductive trigger (inductive hit -> cycle runs)"));
+    Serial.println(F("  Press GO again to disarm"));
     printMenu();
     printSettings();
 }
@@ -133,7 +161,22 @@ void setup()
 void loop()
 {
     collection_update();                        // keeps eased moves running
-    digitalWrite(LED_PIN, (millis() / 500) & 1);
+
+    // GO button: toggle armed mode (debounced)
+    static bool lastGo = false;
+    bool go = (digitalRead(PIN_GO) == HIGH);
+    if (go && !lastGo)
+    {
+        goArmed = !goArmed;
+        Serial.println(goArmed ? F("[GO] armed  - inductive trigger ON")
+                               : F("[GO] disarmed - inductive trigger OFF"));
+    }
+    lastGo = go;
+
+    checkInductiveTrigger();
+
+    digitalWrite(LED_PIN, goArmed ? ((millis() / 100) & 1)   // fast blink = armed
+                                  : ((millis() / 500) & 1)); // slow blink = idle
 
     if (!Serial.available()) return;
     String line = Serial.readStringUntil('\n');
