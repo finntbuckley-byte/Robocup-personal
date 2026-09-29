@@ -170,14 +170,14 @@ void collection_update(void)
             {
                 Serial.print(F("[collection] HOLD: easing to rest ")); Serial.print(tuning.restAngle);
                 Serial.print(F(" deg @ ")); Serial.print(tuning.restDps, 0);
-                Serial.println(F(" deg/s, magnet stays ON (reduced once parked)"));
+                Serial.println(F(" deg/s, magnet stays ON (configured hold duty once parked)"));
                 arm.moveTo(tuning.restAngle, tuning.restDps); // eased - magnet stays at full power until parked
                 collectionStateEntry = false;
             }
 
             if (!arm.busy())
             {
-                // Reduced holding level, set once and never turned off from here -
+                // Configured holding level, set once and never turned off from here -
                 // not by collection_magnets(), not at round end. Only a power
                 // cycle drops it. See BENCH_TODO.md 2d / config.h MAGNET_HOLD_PCT.
                 analogWrite(MAGNET, (int)((long)MAGNET_HOLD_PCT * 255 / 100));

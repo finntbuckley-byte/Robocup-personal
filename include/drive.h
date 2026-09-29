@@ -10,6 +10,7 @@
 // ============================================================================
 
 void drive(int leftPct, int rightPct);   // signed %, -100..100, differential
+void driveSetStartupBoost(bool enabled); // changes scale only, never commands movement
 void driveForward();
 void driveReverse();
 void turnLeft();

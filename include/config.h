@@ -313,6 +313,10 @@ const int MOTOR_MAX_REV_PCT = 100;
 // User-requested 90% drive scale, 30 Sept; prior 50% version saved as
 // WORKING BOT GO GO GO. This also scales approach, creep and pivot commands.
 const int DRIVE_SCALE_PCT = 90;
+// Launch boost starts at physical GO, not boot. Navigation still controls
+// individual track commands, steering and stops; existing trims still apply.
+const int STARTUP_DRIVE_SCALE_PCT = 100;
+const unsigned long STARTUP_BOOST_MS = 5000;
 
 // Per-track, per-direction trims: multiply that track's percent (after
 // scaling) so the robot drives straight open-loop. Measured on the ground
@@ -593,7 +597,7 @@ const int PIN_MAGNET = 24;        // CON72
 // Confirmed by bench shake test (magnettest env, 2026-09-28): 50% duty held
 // through a shake. Used to carry the 3rd target on the arm at rest instead of
 // dropping it into storage - see COLLECTION_HOLD in collection.cpp.
-const int MAGNET_HOLD_PCT = 60;   // % duty while carrying the 3rd target
+const int MAGNET_HOLD_PCT = 100;  // full duty for third-weight retention, requested 30 Sept
 
 // eased servo moves (smooth_servo.cpp) - used by the crane
 const unsigned long SERVO_MIN_MOVE_MS     = 150;  // floor for tiny moves

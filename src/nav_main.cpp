@@ -461,6 +461,9 @@ void loop()
   if (wasRunning && roundOver()) summarySaveAndPrint();
   wasRunning = roundRunning();
 
+  // Five-second launch window after GO, with all normal navigation decisions
+  // intact. It never restarts after a stop, collection cycle or sensor dropout.
+  driveSetStartupBoost(!killed && roundRunning() && roundElapsedMs() < STARTUP_BOOST_MS);
   if (killed)             driveHardStop();
   else if (!roundRunning()) driveHardStop();
   else                           navigationUpdate();

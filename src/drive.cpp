@@ -7,6 +7,9 @@ static int lastRightPct = 0;
 static float outLeft  = 0.0f;   // command actually sent, after the soft-start ramp
 static float outRight = 0.0f;
 static unsigned long lastDriveMs = 0;
+static bool startupBoost = false;
+
+void driveSetStartupBoost(bool enabled) { startupBoost = enabled; }
 
 static inline int clampPct(int v) { return v > 100 ? 100 : (v < -100 ? -100 : v); }
 
@@ -16,7 +19,8 @@ static inline int clampPct(int v) { return v > 100 ? 100 : (v < -100 ? -100 : v)
 // motor.cpp maps 0-100% into the driver's 1.05-1.95 ms window.
 static void driveOneMotor(float pct, int motorNum)
 {
-  pct = pct * DRIVE_SCALE_PCT / 100.0f;
+  const int scale = startupBoost ? STARTUP_DRIVE_SCALE_PCT : DRIVE_SCALE_PCT;
+  pct = pct * scale / 100.0f;
   if (motorNum == 1) pct *= (pct >= 0 ? DRIVE_TRIM_L_FWD : DRIVE_TRIM_L_REV);   // motor 1 = LEFT
   else               pct *= (pct >= 0 ? DRIVE_TRIM_R_FWD : DRIVE_TRIM_R_REV);   // motor 2 = RIGHT
   int mag = (int)(pct >= 0 ? pct + 0.5f : -pct + 0.5f);
