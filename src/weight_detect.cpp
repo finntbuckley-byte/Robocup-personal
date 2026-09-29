@@ -2,6 +2,15 @@
 #include "tof.h"
 #include "x8.h"
 #include "config.h"
+#include "sensor_geometry.h"
+
+static uint16_t viewRange(bool left)
+{
+  const int index = lowerViewIndex(left, LOWER_BEAMS_CROSSED, TOF_BL, TOF_BR);
+  return tofOk(index) ? tofMM[index] : 0;
+}
+uint16_t weightViewLeftMM() { return viewRange(true); }
+uint16_t weightViewRightMM() { return viewRange(false); }
 
 // A bottom ToF sees something, and the 8x8's obstacle band on the same side
 // sees nothing at a similar distance -> something short -> weight candidate.
@@ -17,11 +26,11 @@ static bool pairSeesWeight(uint16_t bot, uint16_t top)
 // candidates - better to miss one than to drive into a wall "approaching" it.
 static bool weightLeft()
 {
-  return x8Fresh() && tofOk(TOF_BL) && pairSeesWeight(tofBL, x8LeftMM());
+  return x8Fresh() && pairSeesWeight(weightViewLeftMM(), x8LeftMM());
 }
 static bool weightRight()
 {
-  return x8Fresh() && tofOk(TOF_BR) && pairSeesWeight(tofBR, x8RightMM());
+  return x8Fresh() && pairSeesWeight(weightViewRightMM(), x8RightMM());
 }
 
 bool     weightFound  = false;
@@ -60,10 +69,10 @@ void weightDetectUpdate()
       if (L && R)
       {
         weightSide   = 0;
-        weightDistMM = (tofBL < tofBR) ? tofBL : tofBR;
+        weightDistMM = (weightViewLeftMM() < weightViewRightMM()) ? weightViewLeftMM() : weightViewRightMM();
       }
-      else if (L) { weightSide = -1; weightDistMM = tofBL; }
-      else        { weightSide = +1; weightDistMM = tofBR; }
+      else if (L) { weightSide = -1; weightDistMM = weightViewLeftMM(); }
+      else        { weightSide = +1; weightDistMM = weightViewRightMM(); }
     }
   }
   else

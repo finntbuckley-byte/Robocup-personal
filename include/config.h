@@ -73,6 +73,12 @@
 // discrepancy-based logic proven out in stack_test.cpp/BENCH_TODO.md 2h -
 // integrating it into the nav build for a full round simulation test.
 #define USE_LYING_WEIGHT_REJECT 1
+// 30 Sept round adjustment: keep notch-assisted creep, but disable the
+// mismatch rejection that has been abandoning upright weights.
+const bool REJECT_FROM_TOP_NOTCH_MISMATCH = false;
+// Disable backing-up in both weight rejection and obstacle escape.
+// Pivot turns still use opposite track directions.
+const bool NAV_RECOVERY_REVERSE_ENABLED = false;
 
 // ---------------------------------------------------------------------------
 // ROBOT GEOMETRY  (mm)
@@ -92,6 +98,8 @@ const byte SX1509_ADDRESS = 0x3F;
 // index order used EVERYWHERE:
 const int TOF_BL      = 0;   // bottom-left  VL53L0X          CON29 / XSHUT2
 const int TOF_BR      = 1;   // bottom-right VL53L0X          CON28 / XSHUT1
+// Confirmed 30 Sept: physical right points left and physical left points right.
+const bool LOWER_BEAMS_CROSSED = true;
 const int TOF_UPRIGHT = 2;   // weight-detect, across notch   CON27 / XSHUT0
 const int TOF_REAR    = 3;   // rear VL53L0X (2026-09-28: swapped from L1X)  CON30 / XSHUT3
 // baseplate-top, lying-weight reject   CON31 / XSHUT4 - NOT YET FITTED
@@ -161,7 +169,8 @@ const byte X8_ADDRESS = 0x33;
 // Grid is row-major (buf[row*8 + col], per the DFRobot example), in mm.
 // Orientation depends on how it's mounted: print the grid ('g' in the nav
 // build's serial menu), wave a hand top-left of the sensor, flip these until
-// the grid matches reality. TODO(verify) all four on the robot.
+// the grid matches reality. 30 Sept captures support the unflipped mapping:
+// low floor/weight returns at r7; left/right targets at low/high columns.
 const float X8_COL_SIGN   = +1.0f;   // +1: column 7 is the robot's RIGHT
 #define     X8_ROW_FLIP   0          // 1: row 0 is the BOTTOM of the field
 const float X8_FOV_DEG    = 60.0f;   // horizontal field of view
@@ -301,8 +310,9 @@ const int MOTOR_MAX_FWD_PCT = 100;
 const int MOTOR_MAX_REV_PCT = 100;
 
 // Scales EVERY drive command (after navigation, before the pulse caps).
-// 50 for first floor tests; set back to 100 once avoidance behaves.
-const int DRIVE_SCALE_PCT = 50;
+// User-requested 90% drive scale, 30 Sept; prior 50% version saved as
+// WORKING BOT GO GO GO. This also scales approach, creep and pivot commands.
+const int DRIVE_SCALE_PCT = 90;
 
 // Per-track, per-direction trims: multiply that track's percent (after
 // scaling) so the robot drives straight open-loop. Measured on the ground
@@ -468,7 +478,7 @@ const unsigned long INDUCTIVE_CONFIRM_MS = 60;    // metal must read steadily th
 const int  CREEP_START_MM   = 200;   // candidate lost closer than this -> creep, not give up
 const int  CREEP_SPEED_PCT  = 30;
 const unsigned long CREEP_MAX_MS = 1000;   // no metal by then -> REJECT
-const int  MAX_PICKUP_TRIES = 2;
+const int  MAX_PICKUP_TRIES = 3;
 // after giving up on a weight, the inductive trigger stays locked until the
 // notch has read clear this long (else a stuck weight is retried forever)
 const unsigned long METAL_REARM_CLEAR_MS = 500;     // metal still in the notch after a cycle = missed grab -> retry
@@ -565,6 +575,7 @@ const unsigned long TARGET_SUPPRESS_MS = 1500;
 // servo_test.cpp), then paste the printed values back here.
 // ---------------------------------------------------------------------------
 const int   CRANE_PICKUP_ANGLE = 113;   // was 118 (2026-09-29: reduced 5 deg to increase magnet contact)
+const unsigned long CRANE_PICKUP_SEAT_MS = 1500; // full wait at pickup angle before lifting
 const float CRANE_PICKUP_DPS   = 45.0f;
 const int   CRANE_DROP_ANGLE   = 40;
 const float CRANE_DROP_DPS     = 60.0f;
@@ -588,7 +599,7 @@ const int MAGNET_HOLD_PCT = 60;   // % duty while carrying the 3rd target
 const unsigned long SERVO_MIN_MOVE_MS     = 150;  // floor for tiny moves
 const unsigned long SERVO_STEP_INTERVAL_MS = 15;  // angle update period during a move
 
-// a full crane cycle is ~3.9s (SERVODELAY1+2 + DROP + SERVODELAY3); give up
+// A full crane cycle is about 5s including the 1.5s seated wait; give up
 // waiting after this so a stuck crane can't park the robot for the round
 const unsigned long PICKUP_TIMEOUT_MS = 8000;
 

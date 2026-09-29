@@ -20,5 +20,8 @@ extern int      pickupAttempts;  // telemetry: how many times PICKUP has run
 void suppressTargetFor(unsigned long ms);
 bool targetSuppressed();
 void weightDetectUpdate();
+// Fresh ranges by viewing side; raw tofBL/tofBR remain physical telemetry.
+uint16_t weightViewLeftMM();
+uint16_t weightViewRightMM();
 
 #endif /* __WEIGHT_DETECT_H */

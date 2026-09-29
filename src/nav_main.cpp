@@ -462,7 +462,7 @@ void loop()
   wasRunning = roundRunning();
 
   if (killed)             driveHardStop();
-  else if (!roundRunning()) stopMotors();
+  else if (!roundRunning()) driveHardStop();
   else                           navigationUpdate();
 
   // 6. telemetry

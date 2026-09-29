@@ -202,7 +202,8 @@ static void updateLyingMismatch()
 
 static bool lyingWeightConfirmed()
 {
-  return lyingSince != 0 && millis() - lyingSince >= tuning.lyingConfirmMs;
+  return REJECT_FROM_TOP_NOTCH_MISMATCH && lyingSince != 0 &&
+         millis() - lyingSince >= tuning.lyingConfirmMs;
 }
 
 // the notch ToF sees something to creep onto (stack_test: SEARCH -> CREEP)
@@ -333,8 +334,10 @@ static void startReject(const char *why)
   rejectDir = (lastWeightSide < 0) ? +1 : -1;
   Serial.print(">>> REJECT #"); Serial.print(rejectCount);
   Serial.print(" - "); Serial.println(why);
-  rejectPivoting = false;
+  rejectPivoting = !NAV_RECOVERY_REVERSE_ENABLED;
   rejectStartMm = odomRawDistanceMM();
+  rejectPivotAt = millis();
+  rejectStartHdg = imuHeadingDeg();
   setMode(MODE_REJECT);
 }
 
@@ -453,7 +456,7 @@ void navigationUpdate()
       break;
 
     case MODE_ESCAPE:
-      if (held > ESCAPE_REV_MS + escapeSpinMs)
+      if (held > (NAV_RECOVERY_REVERSE_ENABLED ? ESCAPE_REV_MS : 0UL) + escapeSpinMs)
       {
         flipCount = 0; lastTurn = 0; lastTurnEnd = millis();
         lastFindOrEvent = millis();
@@ -569,7 +572,15 @@ void navigationUpdate()
           modeStart = millis();
           break;
         }
-        if (!timedOut && !stillThere) noteCollected();
+        if (!timedOut && !stillThere)
+        {
+          noteCollected();
+          if (roundOver())
+          {
+            driveHardStop();
+            return; // no reposition, homing, further pickup or magnet release
+          }
+        }
         else
         {
           metalLockout = true;            // leave this weight behind before triggering again
@@ -667,7 +678,7 @@ void navigationUpdate()
     case MODE_TURN_RIGHT:  turnRight();  break;
 
     case MODE_ESCAPE:
-      if (held < ESCAPE_REV_MS)
+      if (NAV_RECOVERY_REVERSE_ENABLED && held < ESCAPE_REV_MS)
       {
         if (rearBlocked()) driveHardStop();
         else               driveReverse();
@@ -683,9 +694,10 @@ void navigationUpdate()
     case MODE_APPROACH:
     {
       int steer;
-      if (weightSide == 0 && tofBL > 0 && tofBR > 0)
+      const uint16_t viewLeft = weightViewLeftMM(), viewRight = weightViewRightMM();
+      if (weightSide == 0 && viewLeft > 0 && viewRight > 0)
       {
-        float err  = (float)tofBL - (float)tofBR;
+        float err  = (float)viewLeft - (float)viewRight;
         float dErr = err - approachErrPrev;
         approachErrPrev = err;
         float s = KP_APPROACH * err + KD_APPROACH * dErr;
@@ -711,9 +723,8 @@ void navigationUpdate()
       break;
 
     case MODE_REJECT:
-      // back out of the notch (rear guard below still applies), then pivot
-      // away so the V-notch wall pushes the dummy aside (option C)
-      if (!rejectPivoting)
+      // Current round skips the reverse phase and starts a measured pivot.
+      if (NAV_RECOVERY_REVERSE_ENABLED && !rejectPivoting)
         drive(-REJECT_REVERSE_PCT, -REJECT_REVERSE_PCT);
       else
         drive(rejectDir * REPOSITION_SPEED_PCT, -rejectDir * REPOSITION_SPEED_PCT);

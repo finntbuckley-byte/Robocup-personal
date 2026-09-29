@@ -7,7 +7,6 @@
 #define MAGNET PIN_MAGNET     // pin lives in config.h - single magnet, PWM-capable (2026-09-28)
 
 #define BIG_SERVO PIN_CRANE_SERVO
-#define SERVODELAY1 1380 //update after testing, motion from starting position to weight pickup (was 1200, +15% 2026-09-29)
 #define SERVODELAY2 900 //update after testing, motion from weight pickup to weight drop
 #define SERVODELAY3 400 //motion from weight drop back to holding position. Was 1500: the ~0.3 s rest move finished long before, so the robot just sat still
 #define WEIGHTDROPDELAY 1000  //update after testing, time until weight is safely dropped
@@ -31,6 +30,8 @@ static CraneTuning tuning = {
 };
 
 static bool magnetsReleased = false;
+static bool pickupSeating = false;
+static unsigned long pickupSeatedAt = 0;
 int servoPos = 0;
 
 enum CollectionState
@@ -132,14 +133,22 @@ void collection_update(void)
             {
                 Serial.print(F("[collection] PICKUP: servo -> ")); Serial.print(tuning.pickupAngle);
                 Serial.print(F(" deg @ ")); Serial.print(tuning.pickupDps, 0);
-                Serial.print(F(" deg/s  (dwell "));
-                Serial.print(SERVODELAY1);
+                Serial.print(F(" deg/s  (seated wait after arrival "));
+                Serial.print(CRANE_PICKUP_SEAT_MS);
                 Serial.println(F("ms)"));
                 arm.moveTo(tuning.pickupAngle, tuning.pickupDps); // eased - magnet already on from MAGNET_ON
+                pickupSeating = false;
                 collectionStateEntry = false;
             }
 
-            if (millis() - collectionStateEntryTime >= SERVODELAY1 && !arm.busy())
+            // Start seating only once the commanded move has finished. Travel
+            // time must not consume the configured contact wait.
+            if (!arm.busy() && !pickupSeating)
+            {
+                pickupSeating = true;
+                pickupSeatedAt = millis();
+            }
+            if (pickupSeating && !arm.busy() && millis() - pickupSeatedAt >= CRANE_PICKUP_SEAT_MS)
             {
                 if (holdAtRestArmed)
                 {

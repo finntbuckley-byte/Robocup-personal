@@ -1,5 +1,6 @@
 #include "x8.h"
 #include "config.h"
+#include "sensor_geometry.h"
 #include <Wire.h>
 #include "DFRobot_MatrixLidar.h"
 
@@ -83,11 +84,7 @@ static inline uint16_t nearest(uint16_t a, uint16_t b)
 // zone in ROBOT terms: row 0 = top of the field, col 0 = robot's far left
 static uint16_t zone(uint8_t row, uint8_t col)
 {
-#if X8_ROW_FLIP
-  row = 7 - row;
-#endif
-  if (X8_COL_SIGN < 0) col = 7 - col;
-  uint16_t v = grid[row * 8 + col];
+  uint16_t v = grid[matrixViewIndex(row, col, X8_ROW_FLIP != 0, X8_COL_SIGN < 0)];
   return (v == 0 || v > X8_MAX_VALID_MM) ? 0 : v;
 }
 
@@ -162,6 +159,8 @@ void x8PrintGrid()
   if (!initOk) { Serial.println("8x8 not initialised"); return; }
   Serial.print("--- 8x8 (mm, robot view, 0 = none) age ");
   Serial.print(millis() - lastFrame); Serial.println("ms ---");
+  Serial.println("Robot view: r0 TOP, r7 BOTTOM; c0 LEFT -> c7 RIGHT; * = obstacle rows");
+  Serial.println("Lower beams crossed: physical BR views LEFT; physical BL views RIGHT");
   for (uint8_t r = 0; r < 8; r++)
   {
     Serial.print(r >= X8_BAND_LO && r <= X8_BAND_HI ? "*r" : " r");

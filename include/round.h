@@ -22,7 +22,7 @@ bool roundJustStarted();          // true for exactly one roundUpdate() tick
 unsigned long roundElapsedMs();   // 0 until started
 
 int  targetsOnBoard();            // successful pickups not yet delivered
-void noteCollected();             // navigation: a pickup succeeded
+void noteCollected();             // successful pickup; third latches OVER, retaining magnet hold
 void noteDelivered(int n);        // for the (future) DELIVER state
 
 // false once the cap is reached or it's late in the round - navigation

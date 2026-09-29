@@ -142,6 +142,13 @@ void noteCollected()
 {
   collectedCount++;
   Serial.print(">>> TARGET COLLECTED - on board: "); Serial.println(targetsOnBoard());
+  if (targetsOnBoard() >= MAX_TARGETS_ON_BOARD)
+  {
+    // The third crane cycle has already parked the arm and left the magnet
+    // at its holding duty. End navigation permanently without releasing it.
+    phase = PHASE_OVER;
+    Serial.println(">>> THREE COLLECTED: stopped in place; holding third weight until power off");
+  }
 }
 
 void noteDelivered(int n) { deliveredCount += n; }
