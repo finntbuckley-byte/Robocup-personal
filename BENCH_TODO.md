@@ -213,23 +213,47 @@ gap. `USE_LYING_WEIGHT_REJECT` is back to 1. `config.h` starting values (all sti
 `TOP_PRESENT_MM` 150 (was the 80 placeholder), `LYING_DISCREPANCY_MM` 40 (new),
 `LYING_CONFIRM_MS` 1500 (was 100 - too short, was rejecting real weights still arriving).
 
-New: reject-reverse duration, reposition/turn duration, the discrepancy threshold and the confirm
-window are all live-tunable in the `nav` env over serial, no reflash needed
-(`NavTuning`/`navTuning()` in `navigation.h`/`.cpp`, mirroring `imu.cpp`'s heading-tuning pattern):
-- `rev <ms>` - reject reverse duration (was `REJECT_REVERSE_MS`)
-- `turn <ms>` - reject/reposition pivot duration (was `REPOSITION_TURN_MS`)
-- `disc <mm>` - lying discrepancy max (was `LYING_DISCREPANCY_MM`)
-- `lconf <ms>` - lying confirm window (was `LYING_CONFIRM_MS`)
-- `nt` - print current tuning values, paste-ready for `config.h`
+**Integration 29/9 (branch `integrate-stack-nav`): nav now runs the check exactly as `stack_test.cpp`
+does.** The first port copied the formula but not what made it work - the differences were:
+0 (= nothing) counted as "present"; no presence ceiling, so far-field returns counted too (false
+REJECTs on open floor); the mismatch timer only ran while it was being asked, so it went stale
+across modes; it was checked in FORWARD/APPROACH too; `CREEP_MAX_MS` (1 s) gave up before the
+1.5 s patience window could ever finish; and there was no top ROI. All fixed:
+- presence = `0 < mm < LYING_NOTCH_MAX_MM / LYING_TOP_MAX_MM` (150). `LYING_*` is the single source;
+  the `STACK_*` constants are aliases.
+- the timer is updated every loop. REJECT for lying weights is only acted on in CREEP.
+- FORWARD/APPROACH enter CREEP once the notch ToF sees something (stack_test's SEARCH -> CREEP).
+  After that, CREEP gets `CREEP_HARD_CAP_MS` (8 s) and goes back to FORWARD if the object leaves
+  the notch's view. `CREEP_MAX_MS` (1 s) now only applies to the blind gap before the notch sees anything.
+- after a REJECT, the notch can't restart CREEP for `NOTCH_IGNORE_MS` (4 s).
+- top L1X gets `STACK_TOP_ROI` (8x8), the same as stack_test.
+- nav serial no longer blocks (the old `readStringUntil` froze `loop()` for ~1 s on a key sent
+  without Enter).
+The upright back-away stays removed and heading PID 5/0.5/0.5 is unchanged (arena-tested).
+
+Live-tunable in the `nav` env over serial, no reflash needed (`NavTuning`/`navTuning()` in
+`navigation.h`/`.cpp`). Single keys (`? g u i t x`) act instantly; **tuning lines start with `:`
+and are sent with Enter**:
+- `:rev <ms>` - reject reverse duration (was `REJECT_REVERSE_MS`)
+- `:turn <ms>` - reject/reposition pivot duration (was `REPOSITION_TURN_MS`)
+- `:disc <mm>` - lying discrepancy max (was `LYING_DISCREPANCY_MM`)
+- `:lconf <ms>` - lying confirm window (was `LYING_CONFIRM_MS`)
+- `:ccap <ms>` - creep cap once the notch has seen something (was `CREEP_HARD_CAP_MS`)
+- `:nt` - print current tuning values, paste-ready for `config.h`
+
+- [ ] **Open space check first (blocks or floor):** `nav` running, nothing in front of the robot for
+      60 s - `rej` stays 0 and the mode never shows CREEP/REJECT. If it does, watch `UP`/`TOP` in
+      telemetry: something inside 150 mm is being seen.
 
 - [ ] **Full round simulation (bench or floor, tracks on):** run `nav`, place upright weights and
       confirm none are false-rejected (watch `nt`/telemetry while a weight creeps through the
       notch - top should resolve before `lconf` elapses). Then a lying weight and confirm REJECT
       fires within a reasonable time.
-- [ ] **Tune `disc`/`lconf` live during that sim**, then `rev`/`turn` for how far REJECT actually
-      backs off and clears the spot. Once happy, copy the values `nt` prints into `config.h`
-      (`LYING_DISCREPANCY_MM`/`LYING_CONFIRM_MS`/`REJECT_REVERSE_MS`/`REPOSITION_TURN_MS`) so they
-      survive a reflash.
+- [ ] **Tune `:disc`/`:lconf` live during that sim**, then `:rev`/`:turn` for how far REJECT actually
+      backs off and clears the spot, and `:ccap` for how long a dummy is crept before giving up.
+      Once happy, copy the values `:nt` prints into `config.h`
+      (`LYING_DISCREPANCY_MM`/`LYING_CONFIRM_MS`/`REJECT_REVERSE_MS`/`REPOSITION_TURN_MS`/
+      `CREEP_HARD_CAP_MS`) so they survive a reflash.
 - [ ] Re-run the §2c pickup-chain bench tests (upright pickup, missed-grab retry, CREEP→REJECT)
       to confirm the rewrite hasn't disturbed the existing, already-proven pickup path.
 - [ ] Once trusted: re-check §0's original lying-weight bench note (notch ToF side-on 110mm/end-on

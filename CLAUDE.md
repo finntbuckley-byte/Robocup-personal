@@ -247,7 +247,7 @@ goes stale, the robot crawls and ignores weights.
 | `APPROACH` | Steer on the bottom VL53L0X pair: **PD** when both see the weight, otherwise a one-sided arc. The pickup is **not** triggered by distance |
 | `CREEP` | The bottom pair lost a candidate within 20 cm (they're blind once it's in the notch), so creep straight for up to 1 s |
 | `PICKUP` | **Triggered by the inductive sensor reading metal** (debounced 60 ms). Stop, run the crane, wait for `collection_busy()`. Metal gone afterwards = success (`noteCollected`); still there = retry once |
-| `REJECT` | CREEP times out with no metal ever seen (dummy/nothing): reverse ~10 cm, pivot away, suppress the spot 4 s. No longer gated on the inductive sensor. A second trigger, `lyingWeightConfirmed()` (notch ToF present but the baseplate-top ToF isn't, for a sustained window - checked in FORWARD/APPROACH/CREEP), is **re-enabled 2026-09-29** (`USE_LYING_WEIGHT_REJECT` in `config.h`) with a patient, discrepancy-based rewrite ported from `stack_test.cpp`. Reject-reverse/reposition-turn/discrepancy/confirm timings are live-tunable in `nav` over serial (`rev`/`turn`/`disc`/`lconf`). See `BENCH_TODO.md` 2i |
+| `REJECT` | CREEP times out with no metal ever seen (dummy/nothing): reverse ~10 cm, pivot away, suppress the spot 4 s. No longer gated on the inductive sensor. A second trigger, `lyingWeightConfirmed()` (notch ToF present but the baseplate-top ToF isn't, for a sustained window - acted on in CREEP only), is **re-enabled 2026-09-29** (`USE_LYING_WEIGHT_REJECT` in `config.h`) and runs exactly as `stack_test.cpp` does (see the integration note under Design decisions). Once the notch has seen something, CREEP's give-up cap is `CREEP_HARD_CAP_MS` (8 s), not `CREEP_MAX_MS`. Reject-reverse/reposition-turn/discrepancy/confirm/creep-cap timings are live-tunable in `nav` over serial (`:rev`/`:turn`/`:disc`/`:lconf`/`:ccap`, Enter to send). See `BENCH_TODO.md` 2i |
 
 **Team decision 2026-09-28:** knocked-over (lying) weights were briefly left to just being *ignored* (never read as metal, so REJECT only caught them incidentally via the CREEP timeout), after the first baseplate-top-ToF trigger misfired on upright weights in arena testing and was switched off. **2026-09-29:** `lyingWeightConfirmed()` was rewritten around the patient/discrepancy logic bench- and floor-proven in `stack_test.cpp` - it resets its confirm timer the instant the top ToF gets any valid reading (an upright weight reads bottom-only for a while just entering the notch, which isn't lying down) and only fires on a sustained mismatch - and re-enabled, now under full round-simulation testing in `nav` (`BENCH_TODO.md` 2i).
 | `REPOSITION` | Turn away after a pickup |
@@ -272,9 +272,17 @@ time-based return (`USE_HOMING`) is off until it exists.
   2026-09-29** (`USE_LYING_WEIGHT_REJECT` in `config.h`) with a patient, discrepancy-based rewrite
   ported from `stack_test.cpp`'s bench/floor testing: the confirm timer resets on any valid top
   reading and only fires after a sustained mismatch (`LYING_CONFIRM_MS`) or a large bottom/top
-  discrepancy (`LYING_DISCREPANCY_MM`). All four timings (reject-reverse, reposition-turn,
-  discrepancy, confirm window) are live-tunable in `nav` over serial (`rev`/`turn`/`disc`/`lconf`)
-  for full round-simulation testing. Revisit per `BENCH_TODO.md` 2i.
+  discrepancy (`LYING_DISCREPANCY_MM`). The timings are live-tunable in `nav` over serial
+  (`:rev`/`:turn`/`:disc`/`:lconf`/`:ccap`) for full round-simulation testing. Revisit per `BENCH_TODO.md` 2i.
+- **2026-09-29 integration: nav's lying-weight check IS `stack_test.cpp`'s.** The first port copied
+  the formula but not what made it work. Now: presence = `0 < mm < ceiling` for both notch and top
+  (0 = nothing; the ceiling drops far-field L1X returns), the mismatch timer is updated every loop,
+  it's only acted on in CREEP (entered once the notch ToF sees something), CREEP then gets the 8 s
+  `CREEP_HARD_CAP_MS`, and the top L1X has stack_test's 8x8 ROI. `LYING_*` in `config.h` is the
+  single source - the `STACK_*` equivalents are aliases, so the bench rig and nav can't drift apart.
+  Nav serial never blocks: single keys act instantly, tuning lines start with `:` and end on Enter.
+  The old upright back-away stays removed (it reversed from every weight before the inductive could
+  confirm it); heading PID 5/0.5/0.5 is arena-tested.
 - Inductive proximity is the only viable metal classifier in the parts catalogue.
 - **Crane moves are always non-blocking** (`SmoothServo`). Never use the blocking
   `smoothServoWriteSlow()` in the FSM: it stalls sensors, the round timer and the gate.
