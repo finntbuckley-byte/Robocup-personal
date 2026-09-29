@@ -56,7 +56,10 @@
 //                logic as stack_test.cpp (USE_LYING_WEIGHT_REJECT in
 //                config.h, BENCH_TODO.md 2h/2i). Neither
 //                is gated on the inductive sensor - that's PICKUP-only now
-//                (metalConfirmed()).
+//                (metalConfirmed()). The move (2026-09-29): reverse
+//                REJECT_REVERSE_MM by the encoders, then pivot
+//                REJECT_PIVOT_DEG by the IMU - cut short if the bottom pair
+//                spots another weight once it has turned far enough.
 //      REPOSITION  after a pickup, turn away from the spot, then resume.
 //
 //  ROUND (round.h): weights are only approached while roundWantsWeights() -
@@ -109,7 +112,20 @@ static bool creepNotchSeen = false;         // this CREEP has had the notch ToF 
 static unsigned long notchIgnoreUntil = 0;  // after a REJECT: notch can't restart CREEP until then
 #endif
 
-static NavTuning tuning = { REJECT_REVERSE_MS, REPOSITION_TURN_MS,
+// REJECT phases: reverse by distance, then pivot by angle (see config.h)
+static bool  rejectPivoting = false;
+static float rejectStartMm = 0;        // odomRawDistanceMM() when the reverse began
+static float rejectStartHdg = 0;       // heading when the pivot began
+static unsigned long rejectPivotAt = 0;
+
+static float wrap180(float d)
+{
+  while (d > 180.0f) d -= 360.0f;
+  while (d < -180.0f) d += 360.0f;
+  return d;
+}
+
+static NavTuning tuning = { REJECT_REVERSE_MM, REJECT_PIVOT_DEG, REPOSITION_TURN_MS,
                              LYING_DISCREPANCY_MM, LYING_CONFIRM_MS,
                              CREEP_HARD_CAP_MS };
 NavTuning &navTuning() { return tuning; }
@@ -317,11 +333,22 @@ static void startReject(const char *why)
   rejectDir = (lastWeightSide < 0) ? +1 : -1;
   Serial.print(">>> REJECT #"); Serial.print(rejectCount);
   Serial.print(" - "); Serial.println(why);
-#if USE_LYING_WEIGHT_REJECT
-  // the object may still be in view of the notch after the pivot - don't creep straight back onto it
-  notchIgnoreUntil = millis() + tuning.rejectReverseMs + tuning.repositionTurnMs + NOTCH_IGNORE_MS;
-#endif
+  rejectPivoting = false;
+  rejectStartMm = odomRawDistanceMM();
   setMode(MODE_REJECT);
+}
+
+// end of a REJECT. The lying-mismatch timer kept running while the object was
+// in view - clear it, or the next CREEP would fire an instant second REJECT.
+static void finishReject()
+{
+#if USE_LYING_WEIGHT_REJECT
+  lyingSince = 0;
+  // the object may still be in view of the notch - don't creep straight back onto it
+  notchIgnoreUntil = millis() + NOTCH_IGNORE_MS;
+#endif
+  lastFindOrEvent = millis();
+  lastTurn = 0; flipCount = 0;
 }
 
 // walls outrank prizes: returns true if it switched to a turn/escape
@@ -558,14 +585,56 @@ void navigationUpdate()
       break;
 
     case MODE_REJECT:
-      if (held > tuning.rejectReverseMs + tuning.repositionTurnMs)
+    {
+      if (!rejectPivoting)
       {
+        // reverse until the encoders say rejectReverseMm (rear guard / time cap end it early)
+        float backed = rejectStartMm - odomRawDistanceMM();
+        const char *why = nullptr;
+        if (backed >= tuning.rejectReverseMm) why = "distance reached";
+        else if (rearBlocked())               why = "rear blocked";
+        else if (held > REJECT_REVERSE_MAX_MS) why = "time cap";
+        if (why)
+        {
+          Serial.print(">>> REJECT reversed "); Serial.print(backed, 0);
+          Serial.print(" mm ("); Serial.print(why); Serial.println(") - pivoting");
+          rejectPivoting = true;
+          rejectPivotAt = millis();
+          rejectStartHdg = imuHeadingDeg();
+        }
+        break;
+      }
+
+      unsigned long pivotHeld = millis() - rejectPivotAt;
+      float turned = imuOk() ? fabsf(wrap180(imuHeadingDeg() - rejectStartHdg)) : 0.0f;
+
+      // a DIFFERENT weight: only trusted once the rejected object has swung
+      // out of the bottom pair's view (needs the IMU to know how far we've
+      // turned), and not on the side the rejected object swings towards
+      // (pivoting right, it slides off to the LEFT - weightSide -rejectDir)
+      if (wantWeights && weightFound && imuOk() && turned >= REJECT_NEW_WEIGHT_MIN_DEG &&
+          weightSide != -rejectDir)
+      {
+        Serial.print(">>> REJECT pivot cut at "); Serial.print(turned, 0);
+        Serial.println(" deg - another weight spotted");
+        finishReject();
+        startApproach();
+        break;
+      }
+
+      bool pivotDone = imuOk() ? turned >= tuning.rejectPivotDeg - REJECT_PIVOT_LEAD_DEG
+                               : pivotHeld > tuning.repositionTurnMs;
+      if (pivotDone || pivotHeld > REJECT_PIVOT_MAX_MS)
+      {
+        Serial.print(">>> REJECT pivot done: ");
+        if (imuOk()) { Serial.print(turned, 0); Serial.println(" deg"); }
+        else           Serial.println("timed (no IMU)");
+        finishReject();
         suppressTargetFor(REJECT_SUPPRESS_MS);
-        lastFindOrEvent = millis();
-        lastTurn = 0; flipCount = 0;
         setMode(MODE_FORWARD);
       }
       break;
+    }
 
     case MODE_REPOSITION:
       if (held > tuning.repositionTurnMs)
@@ -644,7 +713,7 @@ void navigationUpdate()
     case MODE_REJECT:
       // back out of the notch (rear guard below still applies), then pivot
       // away so the V-notch wall pushes the dummy aside (option C)
-      if (held < tuning.rejectReverseMs)
+      if (!rejectPivoting)
         drive(-REJECT_REVERSE_PCT, -REJECT_REVERSE_PCT);
       else
         drive(rejectDir * REPOSITION_SPEED_PCT, -rejectDir * REPOSITION_SPEED_PCT);

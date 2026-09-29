@@ -234,8 +234,9 @@ The upright back-away stays removed and heading PID 5/0.5/0.5 is unchanged (aren
 Live-tunable in the `nav` env over serial, no reflash needed (`NavTuning`/`navTuning()` in
 `navigation.h`/`.cpp`). Single keys (`? g u i t x`) act instantly; **tuning lines start with `:`
 and are sent with Enter**:
-- `:rev <ms>` - reject reverse duration (was `REJECT_REVERSE_MS`)
-- `:turn <ms>` - reject/reposition pivot duration (was `REPOSITION_TURN_MS`)
+- `:rev <mm>` - reject reverse DISTANCE by encoder (`REJECT_REVERSE_MM`; was a time until 29/9, see §2j)
+- `:pdeg <deg>` - reject pivot ANGLE by IMU (`REJECT_PIVOT_DEG`)
+- `:turn <ms>` - post-pickup REPOSITION pivot duration (`REPOSITION_TURN_MS`; also the reject pivot if the IMU is down)
 - `:disc <mm>` - lying discrepancy max (was `LYING_DISCREPANCY_MM`)
 - `:lconf <ms>` - lying confirm window (was `LYING_CONFIRM_MS`)
 - `:ccap <ms>` - creep cap once the notch has seen something (was `CREEP_HARD_CAP_MS`)
@@ -252,12 +253,62 @@ and are sent with Enter**:
 - [ ] **Tune `:disc`/`:lconf` live during that sim**, then `:rev`/`:turn` for how far REJECT actually
       backs off and clears the spot, and `:ccap` for how long a dummy is crept before giving up.
       Once happy, copy the values `:nt` prints into `config.h`
-      (`LYING_DISCREPANCY_MM`/`LYING_CONFIRM_MS`/`REJECT_REVERSE_MS`/`REPOSITION_TURN_MS`/
+      (`LYING_DISCREPANCY_MM`/`LYING_CONFIRM_MS`/`REJECT_REVERSE_MM`/`REJECT_PIVOT_DEG`/`REPOSITION_TURN_MS`/
       `CREEP_HARD_CAP_MS`) so they survive a reflash.
 - [ ] Re-run the §2c pickup-chain bench tests (upright pickup, missed-grab retry, CREEP→REJECT)
       to confirm the rewrite hasn't disturbed the existing, already-proven pickup path.
 - [ ] Once trusted: re-check §0's original lying-weight bench note (notch ToF side-on 110mm/end-on
       149mm vs upright 59mm) still holds with the new thresholds.
+
+## 2j. Arena round 29/9 follow-ups
+Lying vs upright discrimination worked well in the arena. Follow-ups:
+- [ ] **REJECT reverse was too short - robot stayed trapped on the rejected object.** Changed 29/9:
+      nav REJECT now reverses `REJECT_REVERSE_MM` (200) **by the encoders** (rear guard or a 2.5 s cap
+      end it early and go straight to the pivot), then pivots `REJECT_PIVOT_DEG` (90) **by the IMU**
+      (timed `REPOSITION_TURN_MS` if the IMU is down, 3 s cap). The pivot is cut short to approach a
+      *different* weight only after >= `REJECT_NEW_WEIGHT_MIN_DEG` (35) of turn and not on the side the
+      rejected object swings to. The lying-mismatch timer is now cleared at the end of a REJECT (it
+      could fire an instant second REJECT). Log lines: `REJECT reversed N mm (why)`, `pivot done: N deg`
+      / `pivot cut at N deg`. **Test:** knocked-over weight on the floor - check the reversed mm and
+      pivot angle in the log, that the object ends up clear, and no immediate re-REJECT. Tune `:rev`
+      / `:pdeg` live; `REJECT_PIVOT_LEAD_DEG` (8) is the stop-early allowance for the soft stop -
+      adjust if the pivot lands well off 90.
+- [ ] **Encoder accuracy check.** New `nav` keys: `z` zero trip, `d` print trip (`TRIP raw_mm corr_mm
+      encL encR slipEv`). Works in WAIT, so push the robot by hand 1.00 m along a tape, 3x, then a
+      powered straight run on the arena floor. Expect ~1000 +/-2%; if not, redo `ENC_COUNTS_PER_M`
+      (§4, enctest).
+- [ ] **Full-round pose check, untethered.** At ROUND OVER (timer or GO-stop) nav prints and **saves
+      to EEPROM** a `SUM` line. Survives power-off: plug in afterwards and press `l` (also printed
+      at every boot). Column header is printed first, then the data row:
+      ```
+      SUM  t_s  x_mm  y_mm  hdg_deg  hdgTot_deg  netRaw_mm  netCorr_mm  path_mm  slipEv  imuOk  imuRst  onb  rej
+      ```
+      - `x_mm` / `y_mm` — displacement from start (+x = direction the robot faced at GO, +y = to
+        its right). Compare with a tape measure after stopping the robot.
+      - `hdg_deg` — final heading, −180..+180 deg (+ = right of start facing). Compare with a
+        protractor or chalk line.
+      - `hdgTot_deg` — total unwrapped rotation (can exceed ±180 if it spun a full circle or more).
+      - `netRaw_mm` / `netCorr_mm` — net encoder distance (signed, raw vs slip-corrected).
+      - `path_mm` — total distance driven (all segments, forward and back).
+      - `slipEv` / `imuRst` — slip events and IMU reboots during the round (both should be 0).
+      **Reading after an untethered round:** place a start mark, run the round, power off, carry
+      robot back to desk, plug in USB, open serial monitor at 115200, press `l`. The last saved
+      round prints. Then go measure where the robot stopped vs the start mark.
+- [ ] **Magnet sometimes lifts the weight slightly but not all the way (arena only, so far).** NO
+      code change yet (team decision 29/9). First check on `servotest` whether it reproduces; if
+      servotest is fine, run more arena tests and note the pattern (weight position in the notch,
+      robot still rolling when the crane starts?, battery level, falls at which point of the lift).
+      Candidate fixes once the pattern is known: hold still ~300 ms before `collection_start()`;
+      pickup angle 118 -> 120; slower lift (`CRANE_DROP_DPS`); longer seat at the bottom
+      (`collection.cpp` - partner's file: the magnet only sits on the weight ~130 ms today, since
+      `SERVODELAY1` counts from state entry and the down-move takes ~1.07 s).
+- [ ] **LATER: 8x8 / weight detection calibration** - rare missed weights. Note the 8x8 doesn't
+      detect weights itself: the bottom L0X pair does, and the 8x8 *vetoes* a candidate with
+      something at a similar distance above it (`weight_detect.cpp`). Likely causes: weight within
+      250 mm (`DIFF_CLEAR_MARGIN_MM`) of a wall / other robot on that side, beyond `WEIGHT_MAX_MM`
+      (500), a global suppression window (1.5 s after a pickup, 4 s after a reject, 3 s after an
+      abandoned approach), or a stale 8x8. Log a round (`tools/serial_log.py`), find the miss, and
+      read `BL BR X8L X8R W` (`supp` in `W`) to see which gate dropped it before changing anything.
 
 ## 2d. Third weight carried on the magnet (held at rest, not dropped)
 - [x] Magnet coils **do get hot** in extended use (partner, from earlier testing), so a full-power

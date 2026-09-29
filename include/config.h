@@ -473,8 +473,21 @@ const int  MAX_PICKUP_TRIES = 2;
 // notch has read clear this long (else a stuck weight is retried forever)
 const unsigned long METAL_REARM_CLEAR_MS = 500;     // metal still in the notch after a cycle = missed grab -> retry
 const int  REJECT_REVERSE_PCT = 40;
-const unsigned long REJECT_REVERSE_MS  = 500;    // aim ~10cm clear of the notch
+const unsigned long REJECT_REVERSE_MS  = 500;    // stack_test / notchtest only - nav reverses by distance (below)
 const unsigned long REJECT_SUPPRESS_MS = 4000;   // ignore that spot for this long
+// nav REJECT (2026-09-29): the timed 500ms reverse left the robot trapped on
+// the rejected object. Now: reverse REJECT_REVERSE_MM by the encoders (raw,
+// not slip-corrected), then pivot REJECT_PIVOT_DEG by the IMU. The pivot is
+// cut short to approach a DIFFERENT weight the bottom pair spots, but only
+// once it has turned REJECT_NEW_WEIGHT_MIN_DEG - before that, a candidate is
+// most likely the rejected object itself. Live-tune with ':rev' / ':pdeg'.
+// TODO(verify) all on the arena floor.
+const int REJECT_REVERSE_MM                = 200;
+const unsigned long REJECT_REVERSE_MAX_MS  = 2500;  // safety cap (tracks stalled/slipping)
+const int REJECT_PIVOT_DEG                 = 90;
+const int REJECT_PIVOT_LEAD_DEG            = 8;     // stop this early - the soft stop carries it on
+const unsigned long REJECT_PIVOT_MAX_MS    = 3000;  // safety cap; without the IMU it's timed (REPOSITION_TURN_MS)
+const int REJECT_NEW_WEIGHT_MIN_DEG        = 35;
 
 // ---------------------------------------------------------------------------
 // LYING-WEIGHT REJECT  -  top/bottom baseplate ToF pair (TOF_TOP, proposed,

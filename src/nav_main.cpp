@@ -27,6 +27,8 @@
 
 #include <Arduino.h>
 #include <Wire.h>
+#include <EEPROM.h>
+#include <math.h>
 #include "config.h"
 #include "motor.h"
 #include "drive.h"
@@ -126,12 +128,13 @@ static void printNavTuning()
 {
   NavTuning &t = navTuning();
   Serial.println("--- nav tuning (live - not saved across a reflash) ---");
-  Serial.print("  rev   (reject reverse)      = "); Serial.print(t.rejectReverseMs);   Serial.println(" ms");
-  Serial.print("  turn  (reject/reposition pivot) = "); Serial.print(t.repositionTurnMs); Serial.println(" ms");
+  Serial.print("  rev   (reject reverse)          = "); Serial.print(t.rejectReverseMm);  Serial.println(" mm");
+  Serial.print("  pdeg  (reject pivot)            = "); Serial.print(t.rejectPivotDeg);   Serial.println(" deg");
+  Serial.print("  turn  (reposition pivot)        = "); Serial.print(t.repositionTurnMs); Serial.println(" ms");
   Serial.print("  disc  (lying discrepancy max)   = "); Serial.print(t.lyingDiscrepancyMm); Serial.println(" mm");
   Serial.print("  lconf (lying confirm window)    = "); Serial.print(t.lyingConfirmMs); Serial.println(" ms");
   Serial.print("  ccap  (creep cap, notch seen)   = "); Serial.print(t.creepCapMs); Serial.println(" ms");
-  Serial.println("paste-ready for config.h: REJECT_REVERSE_MS / REPOSITION_TURN_MS / LYING_DISCREPANCY_MM / LYING_CONFIRM_MS / CREEP_HARD_CAP_MS");
+  Serial.println("paste-ready for config.h: REJECT_REVERSE_MM / REJECT_PIVOT_DEG / REPOSITION_TURN_MS / LYING_DISCREPANCY_MM / LYING_CONFIRM_MS / CREEP_HARD_CAP_MS");
 }
 
 static void printHelp()
@@ -143,10 +146,14 @@ static void printHelp()
   Serial.println(" i  I2C scan of Wire and Wire1");
   Serial.println(" t  telemetry on/off");
   Serial.println(" x  KILL - stop motors until reset");
+  Serial.println(" z  zero the distance trip meter");
+  Serial.println(" d  print the trip meter (encoder distance since 'z')");
+  Serial.println(" l  print the last round's summary (x / y / heading - saved, survives power-off)");
   Serial.println(" live tuning - type the line, then Enter:");
   Serial.println(" :nt          print live nav tuning (reverse/turn/lying-reject/creep timings)");
-  Serial.println(" :rev <ms>    set reject reverse duration   (e.g. ':rev 500')");
-  Serial.println(" :turn <ms>   set reject/reposition pivot duration (e.g. ':turn 700')");
+  Serial.println(" :rev <mm>    set reject reverse distance (e.g. ':rev 200')");
+  Serial.println(" :pdeg <deg>  set reject pivot angle (e.g. ':pdeg 90')");
+  Serial.println(" :turn <ms>   set reposition pivot duration (e.g. ':turn 700')");
   Serial.println(" :disc <mm>   set lying-weight discrepancy max (e.g. ':disc 40')");
   Serial.println(" :lconf <ms>  set lying-weight confirm window (e.g. ':lconf 1500')");
   Serial.println(" :ccap <ms>   set creep cap once the notch sees something (e.g. ':ccap 8000')");
@@ -214,6 +221,125 @@ static void printTelemetry()
   else             { Serial.println("-\t-"); }
 }
 
+// ---------------------------------------------------------------------------
+// Encoder accuracy check. TRIP METER: 'z' zeroes, 'd' prints distance since.
+// Works in WAIT too (odomUpdate() always runs), so the robot can be pushed by
+// hand along a tape measure.
+// ROUND SUMMARY: at ROUND OVER (timer or GO-stop) x / y / heading / distance
+// are printed AND saved to EEPROM, so a round can run untethered: plug in
+// afterwards and press 'l' (it's also printed at every boot).
+// ---------------------------------------------------------------------------
+static float tripRawStart = 0, tripCorrStart = 0;
+static long  tripLStart = 0, tripRStart = 0;
+
+static void tripZero()
+{
+  tripRawStart = odomRawDistanceMM(); tripCorrStart = odomDistanceMM();
+  tripLStart = encLeftCount(); tripRStart = encRightCount();
+  Serial.println(">>> trip zeroed");
+}
+
+static void tripPrint()
+{
+  Serial.println("TRIP\traw_mm\tcorr_mm\tencL\tencR\tslipEv");
+  Serial.print("TRIP\t");
+  Serial.print(odomRawDistanceMM() - tripRawStart, 0); Serial.print('\t');
+  Serial.print(odomDistanceMM() - tripCorrStart, 0);   Serial.print('\t');
+  Serial.print(encLeftCount() - tripLStart);            Serial.print('\t');
+  Serial.print(encRightCount() - tripRStart);           Serial.print('\t');
+  Serial.println(odomSlipEvents());
+}
+
+static float wrap180(float d)
+{
+  while (d > 180.0f) d -= 360.0f;
+  while (d < -180.0f) d += 360.0f;
+  return d;
+}
+
+// unwrapped heading (total rotation, can pass +/-180) and path length (every
+// mm driven, forward or back) - accumulated while the round runs
+static float hdgUnwrapped = 0, hdgLast = 0;
+static float pathMM = 0, pathLastRaw = 0;
+
+static void roundTrackReset()
+{
+  hdgUnwrapped = 0; hdgLast = imuHeadingDeg();
+  pathMM = 0; pathLastRaw = odomRawDistanceMM();
+}
+
+static void roundTrackUpdate()
+{
+  float h = imuHeadingDeg();
+  hdgUnwrapped += wrap180(h - hdgLast);
+  hdgLast = h;
+  float raw = odomRawDistanceMM();
+  pathMM += fabsf(raw - pathLastRaw);
+  pathLastRaw = raw;
+}
+
+const uint32_t SUMMARY_MAGIC = 0x52533233;   // "RS23" - change it if the struct changes
+const int      SUMMARY_EEPROM_ADDR = 64;     // clear of the old IMU-calibration sketch's bytes
+struct RoundSummary
+{
+  uint32_t magic;
+  uint32_t seq;          // counts up every saved round
+  uint32_t elapsedMs;
+  float xMM, yMM;        // pose.h: +x = facing at GO, +y = right
+  float hdgDeg;          // final heading, -180..180 (+ = right of start)
+  float hdgTotalDeg;     // unwrapped: net rotation including full turns
+  float netRawMM, netCorrMM, pathMM;
+  uint16_t slipEvents;
+  uint8_t  imuOk, onboard;
+  uint16_t imuResets, rejects;
+};
+
+static void summaryPrint(const RoundSummary &r, const char *title)
+{
+  Serial.print("--- "); Serial.print(title); Serial.print(" (round #"); Serial.print(r.seq); Serial.println(") ---");
+  Serial.println("SUM\tt_s\tx_mm\ty_mm\thdg_deg\thdgTot_deg\tnetRaw_mm\tnetCorr_mm\tpath_mm\tslipEv\timuOk\timuRst\tonb\trej");
+  Serial.print("SUM\t");
+  Serial.print(r.elapsedMs / 1000.0f, 1); Serial.print('\t');
+  Serial.print(r.xMM, 0);         Serial.print('\t');
+  Serial.print(r.yMM, 0);         Serial.print('\t');
+  Serial.print(r.hdgDeg, 1);      Serial.print('\t');
+  Serial.print(r.hdgTotalDeg, 1); Serial.print('\t');
+  Serial.print(r.netRawMM, 0);    Serial.print('\t');
+  Serial.print(r.netCorrMM, 0);   Serial.print('\t');
+  Serial.print(r.pathMM, 0);      Serial.print('\t');
+  Serial.print(r.slipEvents);     Serial.print('\t');
+  Serial.print(r.imuOk);          Serial.print('\t');
+  Serial.print(r.imuResets);      Serial.print('\t');
+  Serial.print(r.onboard);        Serial.print('\t');
+  Serial.println(r.rejects);
+}
+
+static void summaryPrintSaved()
+{
+  RoundSummary r;
+  EEPROM.get(SUMMARY_EEPROM_ADDR, r);
+  if (r.magic != SUMMARY_MAGIC) { Serial.println("(no saved round summary)"); return; }
+  summaryPrint(r, "LAST SAVED ROUND");
+}
+
+static void summarySaveAndPrint()
+{
+  RoundSummary old;
+  EEPROM.get(SUMMARY_EEPROM_ADDR, old);
+  RoundSummary r;
+  r.magic = SUMMARY_MAGIC;
+  r.seq = (old.magic == SUMMARY_MAGIC) ? old.seq + 1 : 1;
+  r.elapsedMs = roundElapsedMs();
+  r.xMM = poseXmm(); r.yMM = poseYmm();
+  r.hdgDeg = imuHeadingDeg(); r.hdgTotalDeg = hdgUnwrapped;
+  r.netRawMM = odomRawDistanceMM(); r.netCorrMM = odomDistanceMM(); r.pathMM = pathMM;
+  r.slipEvents = (uint16_t)odomSlipEvents();
+  r.imuOk = imuOk() ? 1 : 0; r.onboard = (uint8_t)targetsOnBoard();
+  r.imuResets = (uint16_t)imuResetCount(); r.rejects = (uint16_t)rejectedCount();
+  EEPROM.put(SUMMARY_EEPROM_ADDR, r);   // once per round, motors already stopped
+  summaryPrint(r, "ROUND SUMMARY (saved - 'l' reprints it)");
+}
+
 // Never blocks (the old readStringUntil('\n') froze loop() for up to 1 s on
 // a key sent without Enter - motors held their last command, no avoidance).
 // Single keys act the moment they arrive, as before. Live tuning lines start
@@ -228,7 +354,8 @@ static void runTuningLine(char *line)
 
   if      (!strcasecmp(line, "nt")) {}
   else if (v < 0) { Serial.println("?? needs a value, e.g. ':rev 500'"); return; }
-  else if (!strcasecmp(line, "rev"))   t.rejectReverseMs    = (unsigned long)v;
+  else if (!strcasecmp(line, "rev"))   t.rejectReverseMm    = (int)v;
+  else if (!strcasecmp(line, "pdeg"))  t.rejectPivotDeg     = (int)v;
   else if (!strcasecmp(line, "turn"))  t.repositionTurnMs   = (unsigned long)v;
   else if (!strcasecmp(line, "disc"))  t.lyingDiscrepancyMm = (int)v;
   else if (!strcasecmp(line, "lconf")) t.lyingConfirmMs     = (unsigned long)v;
@@ -262,6 +389,9 @@ static void handleSerial()
       case 'g': x8PrintGrid(); break;
       case 'u': tofPrintRaw(); break;
       case 'i': i2cScan(); probeTofs("now"); break;
+      case 'z': tripZero(); break;
+      case 'd': tripPrint(); break;
+      case 'l': summaryPrintSaved(); break;
       case 't': telemetryOn = !telemetryOn; if (telemetryOn) printTelemetryHeader(); break;
       default: break;   // stray Enter etc.
     }
@@ -295,6 +425,7 @@ void setup()
 
   printHelp();
   printNavTuning();
+  summaryPrintSaved();
   printTelemetryHeader();
 }
 
@@ -322,7 +453,13 @@ void loop()
 
   // 5. round + navigation
   roundUpdate();
-  if (roundJustStarted()) { navigationInit(); odomReset(); imuZero(); headingHoldReset(); poseReset(); }   // distance + heading from the start position
+  if (roundJustStarted()) { navigationInit(); odomReset(); imuZero(); headingHoldReset(); poseReset(); roundTrackReset(); }   // distance + heading from the start position
+
+  // round summary: tracked while running, saved + printed once at ROUND OVER
+  static bool wasRunning = false;
+  if (roundRunning()) roundTrackUpdate();
+  if (wasRunning && roundOver()) summarySaveAndPrint();
+  wasRunning = roundRunning();
 
   if (killed)             driveHardStop();
   else if (!roundRunning()) stopMotors();
