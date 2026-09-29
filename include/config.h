@@ -70,7 +70,7 @@
 // RE-ENABLED 2026-09-29: was disabled 2026-09-28 (arena testing found the
 // original top/bottom lying-weight reject wasn't working). navigation.cpp
 // lyingWeightConfirmed() has since been rewritten around the patient,
-// discrepancy-based logic proven out in stack_test.cpp/BENCH_TODO.md 2h -
+// discrepancy-based logic proven out in stack_test.cpp/BENCH_TODO.md 2e -
 // integrating it into the nav build for a full round simulation test.
 #define USE_LYING_WEIGHT_REJECT 1
 
@@ -494,7 +494,7 @@ const unsigned long REJECT_SUPPRESS_MS = 4000;   // ignore that spot for this lo
 // what was causing real upright weights to get rejected too quickly.
 //
 // 2026-09-29: rewritten to match the patient, discrepancy-based logic
-// proven out in stack_test.cpp (BENCH_TODO.md 2h) rather than the original
+// proven out in stack_test.cpp (BENCH_TODO.md 2e) rather than the original
 // simple "both within a fixed band" check. Mismatch = bottom present with
 // top NEVER confirming (the real lying-weight signature - top only ever
 // sees an UPRIGHT weight's top edge), OR both valid but far apart

@@ -51,7 +51,7 @@
 //                confirms, held patiently - checked in FORWARD/APPROACH/
 //                CREEP), RE-ENABLED 2026-09-29 (USE_LYING_WEIGHT_REJECT in
 //                config.h) with logic ported from stack_test.cpp's
-//                bench/arena-tested version - see BENCH_TODO.md 2h. Neither
+//                bench/arena-tested version - see BENCH_TODO.md 2e. Neither
 //                is gated on the inductive sensor - that's PICKUP-only now
 //                (metalConfirmed()).
 //      REPOSITION  after a pickup, turn away from the spot, then resume.
@@ -158,7 +158,7 @@ static int roomierSide();
 //
 // RE-ENABLED 2026-09-29 (USE_LYING_WEIGHT_REJECT in config.h) with this
 // logic ported from stack_test.cpp's bench/arena-tested version - see
-// BENCH_TODO.md 2h. Tune live with nav_main's 'disc'/'lconf' commands.
+// BENCH_TODO.md 2e. Tune live with nav_main's 'disc'/'lconf' commands.
 static bool lyingWeightConfirmed()
 {
   if (!tofOk(TOF_TOP) || !tofOk(TOF_UPRIGHT)) { lyingSince = 0; return false; }

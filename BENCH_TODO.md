@@ -4,15 +4,10 @@ Work top to bottom. 🤖 = Claude can do it from the laptop once the Teensy is p
 **data** USB cable).
 
 ## 0. Next session (from 27–28/9 late, plus 29/9 plan)
-- [ ] **Lying-weight reject: try again.** The top/bottom ToF reject (`lyingWeightConfirmed()`,
-      `USE_LYING_WEIGHT_REJECT` in `config.h`) was switched off 28/9 - arena testing found it
-      wasn't working. Sensor + function are still in, just not wired into the FSM. See §2g for
-      what to check (thresholds, mounting height, whether it's even triggering) before turning it
-      back on.
-- [ ] **Integrate a servo board that protects against short circuits** on the crane servo line.
-      (Note: this may or may not be the same 504/514-family board already noted below as "not
-      available" for back-EMF isolation - confirm which board this actually is and what fault it
-      protects against before wiring it in.)
+- [ ] **Lying-weight reject:** now wired back into `nav` (`USE_LYING_WEIGHT_REJECT` in `config.h`)
+      with logic ported from `stack_test.cpp` - see §2e for the integration/tuning task.
+- [x] (done 29/9) **Integrate a servo board that protects against short circuits** on the crane
+      servo line.
 - [x] **Notch ToF fault (28/9): the sensor (or its cable) was faulty, not the port.** Swapping
       CON27 <-> CON30 moved the fault with the sensor; a replacement on CON27 then ranged cleanly
       (all 4 ToFs stayed at 0x34-0x37, no errors). Positions re-confirmed: weight in the notch =
@@ -20,8 +15,9 @@ Work top to bottom. 🤖 = Claude can do it from the laptop once the Teensy is p
       **Label the faulty sensor and keep it off the robot.** TEMP diagnostics removed; `u`/`i` kept.
 - [x] **Flange reprint: done.** Ruler runs / `HEADING_I_START` and `ENC_COUNTS_PER_M` are covered
       by the new §2f (motion/PID calibration) and §4 encoder recheck items - no longer blocked.
-- [ ] Recalibrate `ENC_COUNTS_PER_M` **with the heading hold on**, on the **arena floor**: hold-on
-      runs gave ~15,750–15,900 counts/m vs 15,640 without (steering scrub adds counts).
+- [x] (done 29/9) Recalibrate `ENC_COUNTS_PER_M` **with the heading hold on**, on the **arena
+      floor**: hold-on runs gave ~15,750–15,900 counts/m vs 15,640 without (steering scrub adds
+      counts).
 - [x] (record) Heading-hold findings 28/9: IMU matches the ruler within ~1 deg; hold cut the turn from
       8–12 deg to 1–5 deg over ~60 cm. The robot runs straight for ~1 s then starts turning
       right in most runs - partly the floor at the first test spot, partly something on the robot
@@ -82,12 +78,11 @@ Work top to bottom. 🤖 = Claude can do it from the laptop once the Teensy is p
 - [x] Watch for servo heat / buzzing after repeated pickups (done 25/9: endurance loop on a plastic dummy, no heat).
 - [x] ~~514 servo isolator board~~ **not available** (28/9). Avoid hard knocks to the crane arm; if a log ever shows an unexplained reset right after the arm is hit, that's the likely cause (back-EMF).
 
-## 2b. Dummy rejection (inductive sensor at the notch, 40 mm up, front-on)
-- [ ] **Needs an insert-dummy (plastic with a steel top). None found yet.** Upright in the notch
-      it should read non-metal (the sensor sees the side, not the steel top). Also try it lying with
-      its top facing the sensor, which may false-trigger.
-- [ ] Then: pickup only if the inductive sensor reads metal; otherwise reverse about 10 cm and
-      pivot away (option C). Only design the flinger if dummies keep getting re-found.
+## 2b. Dummy rejection (inductive sensor at the notch, 40 mm up, front-on) - DONE 29/9
+- [x] (done 29/9) Insert-dummy (plastic with a steel top) tested upright and lying against the
+      inductive sensor.
+- [x] (done 29/9) Pickup only if the inductive sensor reads metal; otherwise reverse ~10 cm and
+      pivot away (option C).
 
 ## 2c. New pickup logic (inductive trigger, CREEP / REJECT): bench tests on blocks
 Flash `nav`, robot on blocks, say go before pressing GO. 🤖 logs each one.
@@ -99,141 +94,22 @@ Flash `nav`, robot on blocks, say go before pressing GO. 🤖 logs each one.
 - [x] (28/9: stopped itself at 118.5 s, no resets, IMU 0 resets, 8x8 never stale, pickup counted) **Full 2-min round, hands off:** stops itself at ~118.5 s, no hang, no reset (`ms` never jumps
       back to 0). With a pickup in it, this also checks crane + both tracks together don't brown out.
 
-## 2e. Notch back-away (settle logic, `notch_backaway_test.cpp` / `notchtest` env) - DEFERRED 28/9
-Team decision 28/9: stop tuning this in isolation on the bench. `UPRIGHT_BACKAWAY_SETTLE_MS` will
-be calibrated during whole-round testing instead, against real funnel/CREEP approaches rather than
-a hand placing objects. Bench findings kept for when this is picked back up:
-- [ ] **`UPRIGHT_BACKAWAY_SETTLE_MS`**: the anchor/window settle check (not frame-to-frame) is
-      sensitive to how slowly an object is placed - a hand placing a weight naturally decelerates on
-      approach, and at 400ms the trigger still fired ~400-600ms before the inductive sensor caught up
-      on a slow creep-in. 800ms passed that case; `config.h` currently has 600ms, untested. Confirm/
-      retune against real robot approaches once whole-round testing is underway, not on the bench.
-- [ ] **Define proper "ignore this object" behaviour for anything confirmed not upright metal**
-      (dummy, lying weight, or anything else the back-away/REJECT path backs off from), not just the
-      existing 4 s `REJECT_SUPPRESS_MS` spot-ignore. Right now a rejected object can be re-found and
-      re-approached repeatedly once the 4 s window lapses, wasting round time on the same dummy. Needs
-      a design decision: how "confirmed non-target" is remembered (position via odometry/IMU, since
-      there's no colour/ID to recognise it by), how long/whether it's ignored for the rest of the
-      round vs. just longer than 4 s, and how that interacts with a real target weight later ending up
-      near the same spot.
+## 2f. Motion / heading-hold PID calibration (`enctest` env) - DONE 29/9
+`encoder_test.cpp` doubles as a live PID tuning rig: `kp <v>` / `ki <v>` / `kd <v>` / `imax <v>` /
+`maxsteer <v>` set `headingTuning()` gains live (no reflash), `s` prints the current gains AND the
+learned integral, paste-ready for `config.h` (`HEADING_KP/KI/KD/I_MAX/MAX_STEER/I_START`).
+- [x] (done 29/9) Tuned KP/KI/KD on the arena floor; gains saved to `config.h`
+      (`HEADING_KP=5, HEADING_KI=0.5, HEADING_KD=0.5`).
+- [x] (done 29/9) Read `HEADING_I_START` off a settled `T` trace and saved to `config.h`.
 
-## 2f. Motion / heading-hold PID calibration (`enctest` env, extended 28/9)
-`encoder_test.cpp` now doubles as a live PID tuning rig, not just encoder bring-up: `kp <v>` /
-`ki <v>` / `kd <v>` / `imax <v>` / `maxsteer <v>` set `headingTuning()` gains live (no reflash),
-`s` prints the current gains AND the learned integral, paste-ready for `config.h`
-(`HEADING_KP/KI/KD/I_MAX/MAX_STEER/I_START`). `T` still prints the per-run heading/steer/integral
-trace. Recommended order (also in the file header): KP alone until it weaves, add KD to damp
-overshoot, add KI last to kill steady-state drift, then read the settled integral into
-`HEADING_I_START`.
-- [ ] **Tune KP/KI/KD on the arena floor** using `enctest`'s marked-distance runs, `H` to toggle
-      hold on/off for comparison. 3-5 repeats per gain change (single lucky/unlucky run isn't
-      enough), log both final heading error (`hdg`) and mid-run wobble from the `T` trace.
-- [ ] **Read `HEADING_I_START`** off a settled `T` trace once KP/KI/KD are decided, and put it in
-      `config.h` so rounds start already compensated for the track/floor drag bias instead of
-      drifting for the first second while KI winds up from zero.
-- [ ] Blocked on the flange reprint per §0 before the ruler runs are meaningful.
-
-## 2g. Top/bottom baseplate ToF - lying-weight reject (SUPERSEDED 29/9 - rewritten + re-enabled, see §2i)
-5th ToF (`TOF_TOP`, CON31/XSHUT4, VL53L0X, addr 0x38) pairs with the existing notch ToF
-(`TOF_UPRIGHT`) as "bottom": bottom sees something + top doesn't (bench-confirmed blind to a
-weight on its side) = reject before creeping it in. Replaces the old inductive-gated,
-settle-timer back-away check, which was rejecting real upright weights too fast with no top
-sensor to confirm against.
-
-**Status 28/9:** the top sensor is now wired and readable (`u`/telemetry), but arena testing found
-the reject behaviour itself isn't working - it wasn't reliably catching lying weights and/or was
-still misfiring on real ones. **Switched off** (`USE_LYING_WEIGHT_REJECT 0` in `config.h`) so the
-robot falls back to the old "ignore lying weights" behaviour while this gets re-worked. The
-sensor reading and `lyingWeightConfirmed()` itself are untouched - only the FSM call sites are
-guarded out - so re-enabling is a one-line flip once it's fixed.
-
-**Status 29/9:** `lyingWeightConfirmed()` was rewritten around the patient, discrepancy-based
-logic proven out on the bench/floor in `stack_test.cpp` (§2h) and **re-enabled**
-(`USE_LYING_WEIGHT_REJECT 1`). The checklist below was written for the original (misfiring)
-version and is kept for reference only - the current status and test plan are in §2i.
-- [ ] **Retry tomorrow.** Before flipping `USE_LYING_WEIGHT_REJECT` back to 1, work out *why* it
-      wasn't working - pull `u`/telemetry (`TOP`/`TOPok`) on a real lying weight vs a real upright
-      weight and check: is the top sensor actually seeing/not-seeing what's expected at
-      `TOP_PRESENT_MM` (80mm, still a placeholder)? Is the bottom threshold (`BOTTOM_PRESENT_MM`,
-      160mm) even triggering "present" on a real lying weight?
-- [ ] Confirm mounting height above the baseplate matches what's needed to stay blind to a lying
-      weight while still seeing an upright one - this was bench-tested on the standalone rig, not
-      yet fully validated on the mounted sensor in the actual notch geometry.
-- [ ] **Bench-characterise both thresholds** the same way `FUNNEL_PRESENT_MM` was: log raw mm for
-      steel upright, plastic upright, a lying weight, and empty, for BOTH `tofUpright` and
-      `tofTop`. Set `BOTTOM_PRESENT_MM`/`TOP_PRESENT_MM` from real data - both are still
-      placeholders (160mm / 80mm) and likely the root cause of the misfire.
-- [ ] Confirm `LYING_CONFIRM_MS` (100ms) doesn't false-reject a real weight still sliding into
-      place, the same failure mode the old inductive-gated check had.
-- [ ] Once thresholds look right on the bench: flash `nav`, robot on blocks, flip
-      `USE_LYING_WEIGHT_REJECT` to 1, place a lying weight in the notch mid-round and confirm
-      REJECT fires quickly; place a real upright weight and confirm it does NOT reject.
-
-## 2h. stack_test.cpp rework (SEARCH/CREEP/REVERSE + discrepancy confirm, 28/9)
-Reworked per the team's sensor-layout drawing (top plate 34mm, all ToFs 57mm up except the
-underside/notch ToF at 13mm and the inductive at 50mm). Key insight from the geometry: the notch
-ToF (13mm) crosses both an upright weight's body AND a lying weight's silhouette, so it can't
-discriminate alone - but the top ToF (57mm) only intersects an UPRIGHT weight's top 13mm, so it
-legitimately reads nothing for most of a real weight's creep-in. A short fixed timeout can't tell
-"still arriving" apart from "lying down" - only patience (does top EVER resolve as creep
-continues) can.
-
-New flow: `SEARCH` (drive + arc toward whichever outer weight-search ToF, L0X pair, sees
-something) -> `CREEP` (once the notch ToF sees something) -> confirm against the top ToF,
-patiently -> `REVERSE` (confirmed mismatch) or keep creeping. The **inductive sensor overrides
-everything, at any state** - the instant it reads metal, collection starts immediately regardless
-of what notch/top currently say. This is a bench rig only (robot off its tracks - drive commands
-are issued/logged but nothing moves; watch the state-transition prints and `drv_l`/`drv_r`
-telemetry instead of the tracks).
-- [ ] **None of the new constants are bench-tuned yet** - all in `config.h`'s STACK_TEST section,
-      flagged `TODO(verify)`: `STACK_SEARCH_MAX_MM`/`SPEED_PCT`/`ARC_PCT` (search behaviour),
-      `STACK_DISCREPANCY_MM` (secondary numeric signal), `STACK_MISMATCH_CONFIRM_MS` (the patience
-      window - currently 1500ms, a guess), `STACK_CREEP_MAX_MS` (hard fallback cap, 8000ms).
-- [ ] **Characterise the mismatch confirm window against real creep speed.** The whole point of
-      this rework is that the window needs to be at least as long as a real weight typically takes
-      to go from "notch first sees it" to "top first sees it" - measure that on the bench (time
-      the creep, or read it off telemetry timestamps) and set `STACK_MISMATCH_CONFIRM_MS` above
-      it, not by feel.
-- [ ] **Bench-test all four cases end-to-end through the new flow**, not just watching numbers:
-      place a real weight so it's found by search, drive/arc toward it (won't physically move, but
-      confirm the intended `drv_l`/`drv_r` values look right), let it reach the notch, confirm
-      CREEP holds until top resolves rather than rejecting early. Then a dummy (same, should also
-      hold). Then a lying weight (should confirm mismatch and reverse - time how long it actually
-      takes, and whether `STACK_MISMATCH_CONFIRM_MS` needs adjusting). Then present metal directly
-      at any point in any state and confirm the inductive override fires immediately regardless.
-- [ ] Confirm the two new outer weight-search ToFs (L0X, `STACK_XSHUT_SEARCH_L`/`_R`) actually come
-      up - this is new hardware bring-up for this file, not yet tested on any board.
-
-## 2i. Lying-weight reject ported into `nav` for full round-sim testing (29/9)
-`lyingWeightConfirmed()` in `navigation.cpp` was rewritten to match the patient/discrepancy logic
-proven out in `stack_test.cpp` (§2h): it resets its confirm timer the instant the top ToF gets ANY
-valid reading (an upright weight legitimately reads bottom-only while it's still creeping into the
-notch), and only fires REJECT after a sustained mismatch window or a large bottom/top distance
-gap. `USE_LYING_WEIGHT_REJECT` is back to 1. `config.h` starting values (all still `TODO(verify)`):
-`TOP_PRESENT_MM` 150 (was the 80 placeholder), `LYING_DISCREPANCY_MM` 40 (new),
-`LYING_CONFIRM_MS` 1500 (was 100 - too short, was rejecting real weights still arriving).
-
-New: reject-reverse duration, reposition/turn duration, the discrepancy threshold and the confirm
-window are all live-tunable in the `nav` env over serial, no reflash needed
-(`NavTuning`/`navTuning()` in `navigation.h`/`.cpp`, mirroring `imu.cpp`'s heading-tuning pattern):
-- `rev <ms>` - reject reverse duration (was `REJECT_REVERSE_MS`)
-- `turn <ms>` - reject/reposition pivot duration (was `REPOSITION_TURN_MS`)
-- `disc <mm>` - lying discrepancy max (was `LYING_DISCREPANCY_MM`)
-- `lconf <ms>` - lying confirm window (was `LYING_CONFIRM_MS`)
-- `nt` - print current tuning values, paste-ready for `config.h`
-
-- [ ] **Full round simulation (bench or floor, tracks on):** run `nav`, place upright weights and
-      confirm none are false-rejected (watch `nt`/telemetry while a weight creeps through the
-      notch - top should resolve before `lconf` elapses). Then a lying weight and confirm REJECT
-      fires within a reasonable time.
-- [ ] **Tune `disc`/`lconf` live during that sim**, then `rev`/`turn` for how far REJECT actually
-      backs off and clears the spot. Once happy, copy the values `nt` prints into `config.h`
-      (`LYING_DISCREPANCY_MM`/`LYING_CONFIRM_MS`/`REJECT_REVERSE_MS`/`REPOSITION_TURN_MS`) so they
-      survive a reflash.
-- [ ] Re-run the §2c pickup-chain bench tests (upright pickup, missed-grab retry, CREEP→REJECT)
-      to confirm the rewrite hasn't disturbed the existing, already-proven pickup path.
-- [ ] Once trusted: re-check §0's original lying-weight bench note (notch ToF side-on 110mm/end-on
-      149mm vs upright 59mm) still holds with the new thresholds.
+## 2e. Integrate stack_test.cpp processes with old working navigation code
+Combines the former "notch back-away" and "stack_test.cpp rework" items - both were about getting
+the patient, discrepancy-based weight-orientation logic properly working against the real,
+already-proven navigation FSM instead of tuned in isolation.
+- [ ] Integrate `stack_test.cpp`'s SEARCH/CREEP/REVERSE + patient discrepancy-confirm logic into
+      the main `nav` build's navigation FSM in place of the old settle-timer notch back-away check,
+      then validate and tune it (live via `rev`/`turn`/`disc`/`lconf`) in a full round simulation
+      before copying settled values into `config.h`.
 
 ## 2d. Third weight carried on the magnet (held at rest, not dropped)
 - [x] Magnet coils **do get hot** in extended use (partner, from earlier testing), so a full-power
@@ -271,27 +147,13 @@ weights, not further avoidance tuning. `x` kills the motors.
 - [x] Obstacle avoidance: tall-box run, corner handling, false weight detections near
       walls/corners, SCAN-near-wall, APPROACH "no progress" exit - all confirmed good.
 - [ ] **Approach + pickup on a single weight** - the main next test.
-- [ ] **Ground clearance - filing scheduled tonight (28/9).** Only blocks base-rim-dependent
-      tests (homing/delivery: crossing the rim both ways, the 25 mm speed bump, the 100 mm/30%
-      ramp). Everything else in this section - approach/pickup, REJECT, CREEP, arena sensor check,
-      side IR, speed ramp-up - can be tested now, filed or not.
-- [ ] **Pickup push-out check (arena):** every PICKUP event line now says `metal left at X.XX s`
-      (data only). Real lifts on blocks 28/9 lost the metal ~1.2 s in (the lift). A weight pushed
-      out by the arm would leave earlier and still be counted as collected (false `onb` -> the
-      3-target cap stops collecting early). From the arena logs: if push-outs happen, add the
-      crane "lift started" check (option 3: small getter in collection.cpp, partner's OK) and
-      only count a pickup if metal was still there when the lift began.
-- [ ] **Does the V-notch swing actually clear a rejected object?** (REJECT = reverse ~10 cm, pivot,
-      ignore the spot 4 s.) The team isn't convinced it works, so test it with a plastic dummy and a
-      knocked-over weight. Tune `REJECT_REVERSE_MS` / pivot time / `REJECT_SUPPRESS_MS`. If objects
-      don't get pushed clear, or keep getting re-found: longer reverse + bigger turn first, then
-      the under-plate flinger.
+- [x] (done 29/9) **Ground clearance.**
+- [x] (done 29/9) **Pickup push-out check.**
+- [x] (done 29/9) **Does the V-notch swing actually clear a rejected object?** (REJECT)
 - [ ] Creep through the blind gap: tune `CREEP_SPEED_PCT` / `CREEP_MAX_MS` so a real weight reliably
       reaches the inductive sensor before REJECT fires. (Blocks 28/9: a steel weight a few mm outside
       inductive range, ~13-17 cm ahead on the bottom ToFs, was REJECTed as "no metal" - on blocks the
       creep can't push it in. Check on the floor that real weights never get rejected.)
-- [ ] **Test in the actual arena where possible:** black floor/walls change what the bottom ToFs, the
-      8x8 floor rows (r5-r7 set on a lighter floor) and the side IR see. Re-run `g` there first.
 - [ ] Tune `SIDE_NEAR_MM` (side IR, currently 150) against a red wall.
 - [ ] **Raise `DRIVE_SCALE_PCT` back to 100** (`config.h`, currently 50 = half the usable pulse
       range, a safety limiter for first floor tests). Step 50 → 75 → 100 and retest at each step:
@@ -322,7 +184,7 @@ weights, not further avoidance tuning. `x` kills the motors.
         driver), and the left motor then ran backwards (polarity flipped at its screw terminal).
   - [x] Signs (enctest, on blocks): `ENC_L_SIGN = -1`, `ENC_R_SIGN = 1` - forward counts up on both.
   - [x] `ENC_COUNTS_PER_M = 15430`: 5 GO-button runs of ~63 cm at cruise, sd 0.4% (not the arena floor).
-  - [ ] Recheck counts/m on the **arena floor** (1–2 runs) when it's free.
+  - [x] (done 29/9) Recheck counts/m on the **arena floor**.
   - [x] (superseded - the trim isn't the lever: encoders showed equal track speed while it still
         turned, so it's track/floor drag; the heading hold handles it) **Forward trim at cruise:** those runs turned **right ~9°** (6.8–12.2°) and drifted ~5 cm right
         over 63 cm, with `DRIVE_TRIM_L_FWD` 0.90. Part of that was the jolt from the instant stop; the
