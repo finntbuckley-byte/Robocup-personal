@@ -302,7 +302,7 @@ const int MOTOR_MAX_REV_PCT = 100;
 
 // Scales EVERY drive command (after navigation, before the pulse caps).
 // 50 for first floor tests; set back to 100 once avoidance behaves.
-const int DRIVE_SCALE_PCT = 50;
+const int DRIVE_SCALE_PCT = 75;
 
 // Per-track, per-direction trims: multiply that track's percent (after
 // scaling) so the robot drives straight open-loop. Measured on the ground

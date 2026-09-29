@@ -396,7 +396,8 @@ normalised values, for colour-sensor data.
    (no mounting, the PMW3901 needs an 80 mm+ overhang bracket and is unproven on a black floor).
    Slip is caught against the ToFs (`odometry.cpp`). The PMW3901 stays the backup; a storage
    redesign that leaves room for it is being printed in case the encoders prove unreliable.
-7. ~~Gold Sphero colour calibration~~: no longer needed, since the colour sensor was dropped.
+7. ~~Gold Sphero colour calibration~~: no longer needed. **But the TCS34725 is back on the TODO
+   (29/9)** for base-arrival confirmation at the end of homing - see `BENCH_TODO.md` §4.
 8. Collect report data: sorting/collection accuracy, speed, battery, obstacle-avoidance
    success rate.
 

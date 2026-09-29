@@ -391,6 +391,14 @@ weights, not further avoidance tuning. `x` kills the motors.
       see CLAUDE.md), so it's gated on homing/delivery existing. Also **possibly redo/reprint** the
       gate/flap mechanism itself - check with the team whether the current print still fits/works
       before wiring it in.
+- [ ] **Integrate the TCS34725 colour sensor (back on the list 29/9; dropped 24/9).** Use: confirm
+      DOCK has actually landed on *our* base colour (green/blue) before opening the flap, instead of
+      trusting dead-reckoning alone. Needs: a downward mount near the rear (flap end) with its LED
+      close to the floor; a standalone bring-up sketch first (raw CRGB counts on black floor, green
+      base, blue base, base rim). **Address clash:** it's fixed at 0x29, and the ToF chain briefly
+      puts a sensor back on 0x29 during boot and during a stale-sensor recovery, so put it on
+      **`Wire1`** (with the 8x8 at 0x33) or behind the mux - not on the ToF bus. Record our base
+      colour at GO (the robot starts on it) rather than hard-coding green vs blue.
 - [ ] **Drive encoders (27/9)**: `odometry.cpp` + `enctest` env.
   - [x] Wired: Encoder IO board on **CON55 (D2–D5)**, L A/B = 2/3, R A/B = 4/5 (one board, both motors).
         Found + fixed on the way: motor channel 1 was driving the RIGHT track (leads swapped at the
