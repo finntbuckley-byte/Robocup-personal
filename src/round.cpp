@@ -11,8 +11,8 @@
 //  on by hand at the start, so an auto-start delay is legal - but a button is
 //  better (start heading gets zeroed at that moment once the IMU is back).
 //
-//  End: ROUND_MS minus ROUND_END_MARGIN_MS, so the robot is already still
-//  when the round is called and nothing is mid-motion at scoring.
+//  End: GO stop in unlimited arena tests. Timed mode also stops at ROUND_MS
+//  minus ROUND_END_MARGIN_MS. Neither stop automatically resumes without reset.
 //
 //  Targets on board = successful pickups (navigation calls noteCollected()
 //  when a crane cycle started on metal AND the metal is gone from the notch
@@ -114,7 +114,7 @@ void roundUpdate()
         phase = PHASE_OVER;
         Serial.print(">>> ROUND STOPPED (GO) at "); Serial.print(roundElapsedMs()); Serial.println(" ms");
       }
-      else if (roundElapsedMs() >= ROUND_MS - ROUND_END_MARGIN_MS)
+      else if (ROUND_TIME_LIMIT_ENABLED && roundElapsedMs() >= ROUND_MS - ROUND_END_MARGIN_MS)
       {
         phase = PHASE_OVER;
         Serial.print(">>> ROUND OVER  real:"); Serial.print(realWeightCount);
@@ -162,8 +162,12 @@ void noteDelivered(int n) {
 
 bool roundWantsHome()
 {
+  if (!roundRunning() || targetsOnBoard() == 0) return false;
   if (targetsOnBoard() >= MAX_TARGETS_ON_BOARD) return true;
 #if USE_HOMING
+  // Stop to confirm and unload even an incomplete load when we find our base.
+  // colourOnHomeBase requires the colour captured at GO and fresh readings.
+  if (colourOnHomeBase()) return true;
   return !lateReturnConsumed && roundElapsedMs() >= RETURN_HOME_AT_MS;
 #else
   return false;    // no homing yet - keep collecting to the cap all round
@@ -172,7 +176,8 @@ bool roundWantsHome()
 
 bool roundWantsWeights() {
   return roundRunning() && !roundWantsHome() &&
-    roundElapsedMs()+PICKUP_TIMEOUT_MS+PICKUP_VERIFY_TIMEOUT_MS+500 < ROUND_MS-ROUND_END_MARGIN_MS &&
+    (!ROUND_TIME_LIMIT_ENABLED ||
+     roundElapsedMs()+PICKUP_TIMEOUT_MS+PICKUP_VERIFY_TIMEOUT_MS+500 < ROUND_MS-ROUND_END_MARGIN_MS) &&
     colourOk() && colourSurface()==COLOUR_FLOOR;
 }
 

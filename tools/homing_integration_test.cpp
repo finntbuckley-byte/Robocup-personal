@@ -50,7 +50,9 @@ void motorForward(int p,int n){(n==1?motorL:motorR)=p;}
 void motorBackward(int p,int n){(n==1?motorL:motorR)=-p;}
 void motorStop(int n){(n==1?motorL:motorR)=0;}
 void tick(unsigned long ms=20){
-    mockNow+=ms;imuUpdate();poseUpdate();weightDetectUpdate();collection_update();roundUpdate();
+    mockNow+=ms;imuUpdate();poseUpdate();weightDetectUpdate();roundUpdate();
+    if(roundOver()) {driveHardStop();if(collection_busy())collection_stop_motion();homingStop();}
+    else collection_update();
     if(roundRunning()) navigationUpdate();else driveHardStop();
 }
 void put(unsigned r,int16_t v){Wire.regs[r]=v&255;Wire.regs[r+1]=uint16_t(v)>>8;}
@@ -103,6 +105,59 @@ int main(int argc,char**argv){
     assert(roundJustStarted());mockGo=0;
     navigationInit();imuZero();poseReset();homingStartRound();surface=COLOUR_FLOOR;
     travel=1000;tick();assert(imuOk());
+    if(scenario=="empty_home") {
+        surface=home;
+        for(int j=0;j<500;++j)tick();
+        tick(180000);
+        assert(roundRunning() && !roundWantsHome() && !homingNavigating() && gateOpenCalls==0);
+        assert(!collection_busy() && targetsOnBoard()==0);
+        std::cout<<"PASS own base with no load: no unload or return, still running past two minutes\n";return 0;
+    }
+    if(scenario.rfind("incidental_",0)==0) {
+        const int load=scenario=="incidental_two"?2:1;
+        pickup(1);while(!strcmp(modeName(),"REPOSITION"))tick();
+        if(load==2){pickup(2);while(!strcmp(modeName(),"REPOSITION"))tick();}
+        surface=COLOUR_BLUE;tick();assert(!roundWantsHome() && gateOpenCalls==0);
+        surface=COLOUR_FLOOR;tick();assert(!roundWantsHome());
+        if(scenario=="incidental_late")tick(180000);
+        surface=home;
+        for(int j=0;j<500 && targetsOnBoard()!=0;++j)tick();
+        assert(gateOpenCalls==1 && targetsOnBoard()==0 && !collection_holding() && roundRunning());
+        assert(poseDistHomeMM()>600); // colour confirmation, not proximity to estimated origin
+        tick();surface=COLOUR_FLOOR;
+        for(int j=0;j<40;++j)tick();
+        assert(roundWantsWeights() && !homingNavigating());
+        pickup(1);assert(targetsOnBoard()==1);
+        std::cout<<"PASS incidental delivery and subsequent pickup: "<<scenario<<"\n";return 0;
+    }
+    if(scenario=="go_stop_held" || scenario=="go_stop_pickup") {
+        if(scenario=="go_stop_held") {
+            pickup(1);while(!strcmp(modeName(),"REPOSITION"))tick();
+            pickup(2);while(!strcmp(modeName(),"REPOSITION"))tick();pickup(3);
+            assert(collection_holding());
+        } else {
+            metal=true;while(strcmp(modeName(),"PICKUP"))tick();tick();tick();
+            assert(collection_busy());
+        }
+        assert(mockPWM==255);
+        mockGo=1;tick(20);tick(60);
+        assert(roundOver() && !collection_busy() && mockPWM==255);
+        const int stoppedAngle=collection_arm_angle();
+        mockGo=0;for(int j=0;j<500;++j)tick();
+        mockGo=1;tick(100);tick(100);
+        assert(roundOver() && mockPWM==255 && collection_arm_angle()==stoppedAngle);
+        assert(!lastDriveLeftPct() && !lastDriveRightPct());
+        std::cout<<"PASS GO latches drive/crane stop and preserves energized magnet: "<<scenario<<"\n";return 0;
+    }
+    if(scenario=="collection_min_turn") {
+        leftMM=1500;rightMM=220;tick();assert(!strcmp(modeName(),"TURN_L"));
+        rightMM=1500;
+        for(int j=0;j<21;++j)tick();
+        assert(!strcmp(modeName(),"TURN_L"));
+        for(int j=0;j<15;++j)tick();
+        assert(!strcmp(modeName(),"FORWARD"));
+        std::cout<<"PASS collection retains 700ms minimum turn\n";return 0;
+    }
     if(scenario=="pickup_sample_gap"){
         metal=true;
         while(strcmp(modeName(),"PICKUP"))tick();
@@ -143,7 +198,7 @@ int main(int argc,char**argv){
             }
         }
         assert(sawVerify && strcmp(modeName(),"PICKUP"));
-        const int expectedTries=late?1:(allMiss?3:misses+1);
+        const int expectedTries=allMiss?3:misses+1;
         assert(pickupAttempts-startingAttempts==expectedTries);
         assert(targetsOnBoard()==startingCount+(allMiss?0:1));
         if(allMiss && !late){
@@ -151,7 +206,8 @@ int main(int argc,char**argv){
             for(int j=0;j<150;++j)tick();
             assert(pickupAttempts-startingAttempts==3 && targetsOnBoard()==startingCount);
         }
-        if(late || heldThird){tick();tick();assert(homingNavigating());}
+        if(heldThird){tick();tick();assert(homingNavigating());}
+        if(late){tick();tick();assert(!homingNavigating() && targetsOnBoard()==0);}
         if(heldThird)assert(collection_holding() && mockPWM==255);
         std::cout<<"PASS actual pickup verification/retries: "<<scenario<<" attempts="<<expectedTries<<" count="<<targetsOnBoard()<<"\n";
         return 0;
@@ -167,15 +223,17 @@ int main(int argc,char**argv){
         }
         assert(hash==523164021u); // captured from V8 BEFORE homing-only changes
     }
-    if(scenario=="physical_left" || scenario=="physical_right"){
-        const bool physicalLeft=scenario=="physical_left";
-        (physicalLeft?tofBL:tofBR)=350;
+    if(scenario=="physical_left" || scenario=="physical_right" || scenario=="close_left" || scenario=="close_right"){
+        const bool physicalLeft=scenario=="physical_left" || scenario=="close_left";
+        const bool close=scenario.rfind("close_",0)==0;
+        (physicalLeft?tofBL:tofBR)=close?240:350;
         for(int j=0;j<20;++j)tick();
         assert(!strcmp(modeName(),"APPROACH") && !weightCentreActive);
         const int sign=physicalLeft?1:-1;
         assert(weightSide==sign);
-        assert(lastDriveLeftPct()==ONE_SIDE_APPROACH_SPEED_PCT+sign*ONE_SIDE_ARC_PCT);
-        assert(lastDriveRightPct()==ONE_SIDE_APPROACH_SPEED_PCT-sign*ONE_SIDE_ARC_PCT);
+        const int speed=close?CREEP_SPEED_PCT:ONE_SIDE_APPROACH_SPEED_PCT;
+        assert(lastDriveLeftPct()==speed+sign*ONE_SIDE_ARC_PCT);
+        assert(lastDriveRightPct()==speed-sign*ONE_SIDE_ARC_PCT);
         assert(lastDriveLeftPct()>0 && lastDriveRightPct()>0);
         std::cout<<"PASS crossed 60-degree beam -> slow opposite-side arc: "<<scenario<<"\n";
         return 0;
@@ -186,7 +244,7 @@ int main(int argc,char**argv){
         assert(weightCentreActive && weightSide==0);
         assert(!strcmp(modeName(),"APPROACH"));
         assert(lastDriveLeftPct()==APPROACH_SPEED_PCT && lastDriveRightPct()==APPROACH_SPEED_PCT);
-        tofTop=180;tick();assert(!strcmp(modeName(),"CREEP"));
+        tofTop=240;tick();assert(!strcmp(modeName(),"CREEP"));
         for(int j=0;j<70;++j)tick(); // longer than ordinary blind-gap creep
         assert(!strcmp(modeName(),"CREEP"));assert(!collection_busy());
         pickup(1);assert(!collection_holding());
@@ -261,6 +319,34 @@ int main(int argc,char**argv){
     assert(lastDriveLeftPct()!=0 || lastDriveRightPct()!=0);
     assert(motorL!=0 || motorR!=0); // real drive mapping has reached motors
     assert(!collection_busy());assert(roundRunning());
+    if(scenario=="home_min_turn" || scenario=="home_repetition") {
+        auto obstacleTurn=[&](bool rightObstacle) {
+            leftMM=rightObstacle?1500:220;rightMM=rightObstacle?220:1500;
+            tick();assert(!strcmp(modeName(),"TURN_L"));
+            leftMM=rightMM=1500;
+            for(int j=0;j<20;++j)tick(); // 400ms: must not finish earlier
+            assert(!strcmp(modeName(),"TURN_L"));
+            tick();assert(!strcmp(modeName(),"FORWARD")); // first tick after minimum
+            tick(); // observe the completed avoidance episode
+        };
+        obstacleTurn(true);
+        if(scenario=="home_min_turn") {
+            std::cout<<"PASS homing minimum turn 400ms\n";return 0;
+        }
+        obstacleTurn(false); // still commits left on the second episode
+        // Opposite side obstructed: detect repetition but do not redirect there.
+        rightMM=220;leftMM=1500;tick();assert(!strcmp(modeName(),"TURN_L"));
+        rightMM=1500;for(int j=0;j<23;++j)tick();
+        // Now right is open: recovery must override the old left commitment.
+        leftMM=220;rightMM=1500;tick();assert(!strcmp(modeName(),"TURN_R"));
+        assert(Serial.printed.find("HOME_REPEAT recovery direction=right")!=std::string::npos);
+        assert(lastDriveLeftPct()>0 && lastDriveRightPct()<0);
+        leftMM=1500;for(int j=0;j<23;++j)tick();
+        // No displacement: cannot immediately switch back, even if requested.
+        rightMM=220;tick();assert(!strcmp(modeName(),"TURN_R"));
+        assert(collection_holding() && targetsOnBoard()==3 && !collection_busy());
+        std::cout<<"PASS homing repetition, clearance veto, alternate direction, no rapid reversal\n";return 0;
+    }
     if(scenario=="home_detour") {
         rightMM=220;leftMM=1500;
         for(int j=0;j<40;++j)tick();

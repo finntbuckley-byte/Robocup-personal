@@ -22,6 +22,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Round test compilation failed' }
     & .pio/round_test.exe
     if ($LASTEXITCODE -ne 0) { throw 'Round test failed' }
+    & g++ -std=c++17 -Wall -Wextra -Werror -DROUND_TIME_LIMIT_ENABLED=1 -Itools/native_stubs -Iinclude src/round.cpp tools/round_test.cpp -o .pio/round_timed_test.exe
+    if ($LASTEXITCODE -ne 0) { throw 'Timed round test compilation failed' }
+    & .pio/round_timed_test.exe
+    if ($LASTEXITCODE -ne 0) { throw 'Timed round test failed' }
     & g++ -std=c++17 -Wall -Wextra -Werror -Itools/native_stubs -Iinclude src/collection.cpp src/smooth_servo.cpp tools/collection_test.cpp -o .pio/collection_test.exe
     if ($LASTEXITCODE -ne 0) { throw 'Collection test compilation failed' }
     & .pio/collection_test.exe
@@ -32,7 +36,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Weight detector test failed' }
     & g++ -std=c++17 -Wall -Wextra -Werror -Itools/native_stubs -Iinclude src/navigation.cpp src/round.cpp src/collection.cpp src/smooth_servo.cpp src/homing.cpp src/home_core.cpp src/imu.cpp src/pose.cpp src/drive.cpp src/weight_detect.cpp tools/homing_integration_test.cpp -o .pio/homing_integration_test.exe
     if ($LASTEXITCODE -ne 0) { throw 'Homing integration compilation failed' }
-    foreach ($scenario in @('normal','rear_unknown','gate_missing','no_home_colour','late_pickup','top_weight','physical_left','physical_right','delivery_start_30','delivery_start_210','delivery_start_355','home_detour','nav_parity','pickup_first_success','pickup_second_success','pickup_third_success','pickup_all_miss','pickup_flicker','pickup_late_miss','pickup_third_retry','pickup_sample_gap')) {
+    foreach ($scenario in @('normal','rear_unknown','gate_missing','no_home_colour','late_pickup','top_weight','physical_left','physical_right','close_left','close_right','collection_min_turn','home_min_turn','home_repetition','delivery_start_30','delivery_start_210','delivery_start_355','home_detour','nav_parity','pickup_first_success','pickup_second_success','pickup_third_success','pickup_all_miss','pickup_flicker','pickup_late_miss','pickup_third_retry','pickup_sample_gap','empty_home','incidental_one','incidental_two','incidental_late','go_stop_held','go_stop_pickup')) {
         & .pio/homing_integration_test.exe $scenario
         if ($LASTEXITCODE -ne 0) { throw "Homing integration failed: $scenario" }
     }

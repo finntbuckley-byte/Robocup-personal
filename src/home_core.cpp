@@ -3,7 +3,7 @@
 namespace home {
 float wrap(float a) {while(a>180)a-=360;while(a<-180)a+=360;return a;}
 const char* name(State s) {
-    const char* n[]={"COLLECT","RETURN","SEEK_COLOUR","CONFIRM_HOME","ALIGN_START",
+    const char* n[]={"COLLECT","RETURN","SEEK_COLOUR","CONFIRM_HOME","ADVANCE_HOME","ALIGN_START",
         "RECHECK_HOME","TRANSFER_HELD","OPEN_GATE","UNLOAD","CLOSE_GATE","EXIT_TURN","EXIT_BASE","HOME_STOP","HOME_ARRIVED"};
     return n[static_cast<unsigned>(s)];
 }
@@ -75,7 +75,7 @@ Output Controller::tick(const Input& i) {
         waitingGate_=false;entered_=i.now;confirming_=false;
         if(state_==State::Open || state_==State::Unload) {
             // Require current home confirmation before reopening after loss.
-            if(!(i.homeKnown && i.onHome && std::hypot(i.x,i.y)<=p_.arrivalMm &&
+            if(!(i.homeKnown && i.onHome &&
                  std::fabs(wrap(-i.heading))<=p_.turnTolerance))
                 return fail(i,"home or starting heading lost during gate reconnect");
             enter(State::Open,i,"gate recovered; retry open");o.openGate=true;return o;
@@ -84,7 +84,7 @@ Output Controller::tick(const Input& i) {
     }
     const uint32_t held=i.now-entered_;
     const float dist=std::hypot(i.x,i.y);
-    const bool arrived=i.homeKnown && i.onHome && dist<=p_.arrivalMm;
+    const bool arrived=i.homeKnown && i.onHome;
     // imuZero() captures the actual orientation at GO every round. Zero here
     // means that stored orientation, not a fixed compass/arena direction.
     const float headingError=wrap(-i.heading);
@@ -105,7 +105,7 @@ Output Controller::tick(const Input& i) {
     if(state_==State::Return || state_==State::SeekColour || state_==State::Confirm) {
         if(!i.homeKnown && dist<100) return fail(i,"at estimated home; start colour was not captured");
         if(arrived) {
-            if(state_!=State::Confirm) enter(State::Confirm,i,"position and home colour agree");
+            if(state_!=State::Confirm) enter(State::Confirm,i,"own home colour detected; confirm before delivery");
             if(!confirming_) {confirming_=true;confirmAt_=i.now;}
             if(i.now-confirmAt_>=p_.confirmMs) {
                 if(p_.movementOnly) {
@@ -114,9 +114,8 @@ Output Controller::tick(const Input& i) {
                 }
                 const uint32_t budget=15000+(i.heldWeight?4000:0);
                 if(i.remainingMs<=budget) return fail(i,"not enough time for delivery; retain load");
-                spinProgress_=0;lastHeading_=i.heading;
-                turnActiveMs_=0;turnTickAt_=i.now;turnCommanded_=false;
-                enter(State::Align,i,"restore heading recorded at GO before unloading");
+                entryX_=i.x;entryY_=i.y;entryHeading_=i.heading;entryProgress_=0;
+                enter(State::Advance,i,"advance onto home before restoring starting heading");
             }
             return o;
         }
@@ -128,6 +127,34 @@ Output Controller::tick(const Input& i) {
             return driveTo(xy[seekIndex_][0],xy[seekIndex_][1]);
         }
         return driveTo(0,0);
+    }
+    if(state_==State::Advance) {
+        // Signed progress along the arrival heading: turning or sideways drift
+        // must not be mistaken for the requested forward travel.
+        const float rad=entryHeading_*0.01745329252f;
+        entryProgress_=(i.x-entryX_)*std::cos(rad)+(i.y-entryY_)*std::sin(rad);
+        auto beginAlignment=[&](const char* why) {
+            spinProgress_=0;lastHeading_=i.heading;
+            turnActiveMs_=0;turnTickAt_=i.now;turnCommanded_=false;
+            enter(State::Align,i,why);
+            return o; // stop before pivoting on the next tick
+        };
+        if(entryProgress_>=p_.entryDistanceMm)
+            return beginAlignment("home advance complete; restore heading recorded at GO");
+        if(!i.frontFresh) {
+            reason_="home advance paused: front stale";return o;
+        }
+        if((i.front && i.front<p_.frontStopMm) ||
+           (i.left && i.left<p_.frontStopMm) || (i.right && i.right<p_.frontStopMm) ||
+           (i.sideL && i.sideL<p_.sideClearMm) || (i.sideR && i.sideR<p_.sideClearMm))
+            return beginAlignment("home advance shortened by obstacle; align before rechecking colour");
+        const float error=wrap(entryHeading_-i.heading);
+        const float correction=error*p_.entryHeadingKp;
+        const int steer=static_cast<int>(std::fmax(-p_.entryMaxSteer,
+                                                  std::fmin(p_.entryMaxSteer,correction)));
+        reason_="advancing onto home along arrival heading";
+        o.left=p_.entrySpeed+steer;o.right=p_.entrySpeed-steer;
+        return o;
     }
     if(state_==State::Align) {
         if(turnCommanded_) turnActiveMs_+=i.now-turnTickAt_;

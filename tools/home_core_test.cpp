@@ -56,7 +56,7 @@ int main() {
     idle.i.pickupBusy=true;idle.i.request=true;idle.tick();assert(!idle.o.beginReturn);
     idle.i.pickupBusy=false;idle.tick();assert(idle.o.beginReturn);
     Rig r;r.start();r.tick();assert(r.o.navigate && std::fabs(wrap(r.o.targetHeading-180))<0.01f);
-    r.i.onHome=true;r.tick();assert(r.c.state()==State::Return); // wrong place
+    r.i.onHome=true;r.tick();assert(r.c.state()==State::Confirm); // colour outranks drifted position
     r.i.onHome=false;r.i.x=0;r.tick();assert(r.c.state()==State::SeekColour);
     r.i.onHome=true;r.tick();r.tick(620);assert(r.c.state()==State::Align);
     r.spin();r.tick(620);assert(r.o.openGate);r.unload();
@@ -93,17 +93,16 @@ int main() {
     lost.tick(2000);assert(!lost.o.openGate);
     lost.i.onHome=true;lost.tick(300);assert(!lost.o.openGate);
     lost.tick(320);assert(!lost.o.openGate);lost.tick(300);assert(lost.o.openGate);
-    // Observed home contacts rejected by the old 250 mm gate, plus boundaries.
-    Policy broad;broad.arrivalMm=600;
-    for(float distance:{255.f,266.f,302.f,339.f,452.f,533.f,600.f}) {
-        Rig area;area.c=Controller(broad);area.start();area.i.x=distance;area.i.onHome=true;
+    // Own home colour confirms arrival even when accumulated odometry drifts.
+    for(float distance:{255.f,339.f,600.f,601.f,1500.f,2500.f}) {
+        Rig area;area.start();area.i.x=distance;area.i.onHome=true;
         area.tick();area.tick(580);assert(area.c.state()==State::Confirm);
         area.tick(40);assert(area.c.state()==State::Align);area.spin();area.tick(620);
         assert(area.o.openGate);
     }
-    for(bool ownColour:{false,true}) {
-        Rig far;far.c=Controller(broad);far.start();far.i.x=ownColour?601:339;
-        far.i.onHome=ownColour;far.tick();far.tick(620);
+    for(float distance:{339.f,1500.f}) {
+        Rig far;far.start();far.i.x=distance;
+        far.i.onHome=false;far.tick();far.tick(620);
         assert(far.c.state()==State::Return && far.o.navigate && !far.o.openGate);
     }
     Rig gate;gate.start();gate.arrive();gate.spin();gate.tick(620);gate.tick(3020);
@@ -175,7 +174,7 @@ int main() {
             f.i.heading=int(rng()%360)-180;f.tick();
             assert(!(f.o.left<0 && f.o.right<0));
             assert(std::abs(f.o.left)<=57 && std::abs(f.o.right)<=57);
-            if(f.o.openGate) assert(f.i.onHome && std::hypot(f.i.x,f.i.y)<=250 && std::fabs(wrap(f.i.heading))<=10);
+            if(f.o.openGate) assert(f.i.homeKnown && f.i.onHome && std::fabs(wrap(f.i.heading))<=10);
             if(!f.i.frontFresh) assert(!f.o.left && !f.o.right);
         }
     }

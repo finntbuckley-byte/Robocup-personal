@@ -18,8 +18,9 @@ static home::Policy makeHomePolicy() {
     home::Policy p;
     p.movementOnly=HOMING_MOVEMENT_ONLY;
     p.speed=HOME_EXIT_SPEED;p.turn=HOME_DELIVERY_TURN_SPEED;
-    p.arrivalMm=HOME_ARRIVAL_RADIUS_MM;
     p.turnTolerance=HOME_DELIVERY_HEADING_TOLERANCE_DEG;
+    p.entryDistanceMm=HOME_ENTRY_DISTANCE_MM;p.entrySpeed=HOME_ENTRY_SPEED;
+    p.entryHeadingKp=HOME_ENTRY_HEADING_KP;p.entryMaxSteer=HOME_ENTRY_MAX_STEER;
     return p;
 }
 static home::Controller controller(makeHomePolicy());
@@ -37,7 +38,7 @@ void homingStartRound() {
     controller.reset();navigateHome=false;colourCaptureHome();
     trusted=imuOk();resetBaseline=imuResetCount();poseLoss=trusted?"none":"IMU invalid at GO";
     gatePosition=-1;if(!HOMING_MOVEMENT_ONLY) gate_close();
-    Serial.println("EXPERIMENTAL_HOMING_V10_START_HEADING: home colour plus recorded GO heading, gate first then third");
+    Serial.println("EXPERIMENTAL_HOMING_V13_HOME_ADVANCE: advance 150mm on home before alignment; unlimited until GO stop");
 }
 void homingStop() {
     navigateHome=false;
@@ -60,7 +61,7 @@ bool homingUpdate(bool pickupInProgress) {
     i.now=millis();i.running=roundRunning();i.request=roundWantsHome();
     i.pickupBusy=pickupInProgress || collection_busy();
     const uint32_t elapsed=roundElapsedMs(),end=ROUND_MS-ROUND_END_MARGIN_MS;
-    i.remainingMs=elapsed<end?end-elapsed:0;
+    i.remainingMs=ROUND_TIME_LIMIT_ENABLED ? (elapsed<end?end-elapsed:0) : UINT32_MAX;
     i.poseValid=trusted;
     i.homeKnown=colourHome()==COLOUR_GREEN || colourHome()==COLOUR_BLUE;
     i.imuFresh=imuOk();i.x=poseXmm();i.y=poseYmm();i.heading=imuHeadingDeg();
@@ -98,15 +99,17 @@ void homingTelemetry() {
     homingPrintStatus();
 }
 void homingPrintStatus() {
-    Serial.printf("FW=HOMING_V10_START_HEADING HOME state=%s colour=%s home=%s poseOK=%d imuOK=%d distance=%.0f heading=%.1f gate=%d held=%d load=%d\n",
+    Serial.printf("FW=HOMING_V13_HOME_ADVANCE HOME state=%s colour=%s home=%s poseOK=%d imuOK=%d distance=%.0f heading=%.1f gate=%d held=%d load=%d\n",
         home::name(controller.state()),colourName(colourSurface()),colourName(colourHome()),trusted,
         imuOk(),poseDistHomeMM(),imuHeadingDeg(),gatePosition,collection_holding(),targetsOnBoard());
     Serial.printf("HOME_REASON=%s poseLoss=%s gateReady=%d frontFresh=%d rear=%u rearFresh=%d sides=%u,%u round=%s elapsed=%lu\n",
         controller.reason(),poseLoss,gate_found(),x8Fresh(),tofRear,tofOk(TOF_REAR),
         irSideLMM,irSideRMM,roundPhaseName(),roundElapsedMs());
-    Serial.printf("HOME_ENTRY request=%d pickupBusy=%d nav=%s drive=%d,%d imuResets=%d TOP_WEIGHT=1 centreTarget=%d\n",
-        roundWantsHome(),collection_busy(),modeName(),lastDriveLeftPct(),lastDriveRightPct(),imuResetCount(),weightCentreActive);
+    Serial.printf("HOME_ENTRY request=%d pickupBusy=%d nav=%s drive=%d,%d imuResets=%d TOP_WEIGHT=1 centreTarget=%d timed=%d\n",
+        roundWantsHome(),collection_busy(),modeName(),lastDriveLeftPct(),lastDriveRightPct(),imuResetCount(),weightCentreActive,
+        ROUND_TIME_LIMIT_ENABLED);
     Serial.printf("HOME_ARRIVAL onHome=%d distance=%.0f front=%u turnProgress=%.1f gateID=%d startHeadingError=%.1f\n",
         colourOnHomeBase(),poseDistHomeMM(),x8FrontMM(),controller.turnProgress(),GATE_ID,
         home::wrap(-imuHeadingDeg()));
+    Serial.printf("HOME_ADVANCE progress=%.0f target=%.0f\n",controller.entryProgress(),HOME_ENTRY_DISTANCE_MM);
 }

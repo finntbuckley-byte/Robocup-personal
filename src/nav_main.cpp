@@ -419,7 +419,7 @@ void setup()
   Wire1.begin(); Wire1.setClock(400000);
 
   Serial.println("\n--- RoboCup G23 nav build ---");
-  Serial.println("EXPERIMENTAL_HOMING_V10_START_HEADING - home colour plus recorded GO heading, gate first then third");
+  Serial.println("EXPERIMENTAL_HOMING_V13_HOME_ADVANCE - advance 150mm on home before alignment; unlimited until GO stop");
   tofInit();
   x8Init();              // blocks ~5s setting 8x8 mode
   irSensorsInit();
@@ -451,7 +451,15 @@ void loop()
   // 2. weight candidate
   weightDetectUpdate();
 
-  // 3. crane FSM - always ticks, navigation just starts/watches it
+  // Process GO before the crane tick so an accepted stop cannot be followed
+  // by a scheduled magnet release in the same loop iteration.
+  roundUpdate();
+  if (killed || roundOver()) {
+    driveHardStop();
+    if (collection_busy()) collection_stop_motion(); // preserves magnet command
+  }
+
+  // 3. crane FSM - only ticks while not stopped
   if (!killed && !roundOver()) collection_update();
   if (!HOMING_MOVEMENT_ONLY && lastDriveLeftPct()==0 && lastDriveRightPct()==0) gate_update();
 
@@ -459,7 +467,6 @@ void loop()
   funnelSortUpdate();
 
   // 5. round + navigation
-  roundUpdate();
   if (roundJustStarted()) {
     driveHardStop();navigationInit();odomReset();imuZero();headingHoldReset();poseReset();roundTrackReset();
     homingStartRound();

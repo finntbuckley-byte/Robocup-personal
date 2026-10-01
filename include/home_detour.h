@@ -29,6 +29,8 @@ public:
         if (clearTracking_ && now-clearAt_>=clearMs_ && progress>=passMm_) reset();
     }
     bool active() const { return active_; }
+    int direction() const { return direction_; }
+    void redirect(int direction) { reset();choose(direction); }
     bool passing() const { return active_ && passing_; }
     float heading() const { return heading_; }
 private:
@@ -36,5 +38,33 @@ private:
     uint32_t clearMs_,clearAt_=0;
     int direction_=0;
     bool active_=false,passing_=false,clearTracking_=false;
+};
+
+// Count completed avoidance episodes across the short forward gaps between
+// them. Do not reset the position anchor at each turn like the pass controller.
+class Repetition {
+public:
+    Repetition(float progressMm, uint32_t windowMs, unsigned cycles)
+        : progressMm_(progressMm), windowMs_(windowMs), cycles_(cycles) {}
+    void reset() { tracking_=wasAvoiding_=used_=false; count_=0; }
+    void update(uint32_t now, bool avoiding, float x, float y) {
+        if(tracking_ && std::hypot(x-x_,y-y_)>=progressMm_) reset();
+        // Once redirected, require real displacement before another reversal.
+        // A clock alone must not make a stationary robot alternate forever.
+        if(tracking_ && !used_ && now-started_>windowMs_) reset();
+        if(!tracking_) {
+            if(!avoiding) return;
+            tracking_=true;started_=now;x_=x;y_=y;
+        }
+        if(wasAvoiding_ && !avoiding && count_<cycles_) ++count_;
+        wasAvoiding_=avoiding;
+    }
+    bool repeated() const { return tracking_ && !used_ && count_>=cycles_; }
+    void redirected() { used_=true; }
+private:
+    float progressMm_,x_=0,y_=0;
+    uint32_t windowMs_,started_=0;
+    unsigned cycles_,count_=0;
+    bool tracking_=false,wasAvoiding_=false,used_=false;
 };
 }

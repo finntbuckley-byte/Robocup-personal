@@ -1,14 +1,16 @@
 #pragma once
 #include <cstdint>
 namespace home {
-enum class State { Idle, Return, SeekColour, Confirm, Align, Reconfirm, Transfer,
+enum class State { Idle, Return, SeekColour, Confirm, Advance, Align, Reconfirm, Transfer,
                    Open, Unload, Close, ExitTurn, Exit, Failed, Arrived };
 struct Policy {
     bool movementOnly=false;
     uint32_t confirmMs=600, turnTimeoutMs=12000;
     uint32_t transferTimeoutMs=8000, gateTimeoutMs=3000, unloadMs=3000;
     uint32_t exitTimeoutMs=10000;
-    float arrivalMm=250, turnTolerance=10;
+    float turnTolerance=10;
+    float entryDistanceMm=150, entryHeadingKp=1;
+    int entrySpeed=70, entryMaxSteer=20;
     int speed=35, turn=28; // delivery turn and departure only; travel uses navigation.cpp
     int frontStopMm=270, spinClearMm=150, sideClearMm=120;
 };
@@ -37,6 +39,7 @@ public:
     State state() const { return state_; }
     const char* reason() const { return reason_; }
     float turnProgress() const { return spinProgress_; }
+    float entryProgress() const { return entryProgress_; }
     void reset() { *this=Controller(p_); }
 private:
     Policy p_; State state_=State::Idle;
@@ -45,6 +48,7 @@ private:
     uint32_t turnActiveMs_=0, turnTickAt_=0;
     bool turnCommanded_=false;
     float spinProgress_=0,lastHeading_=0;
+    float entryX_=0,entryY_=0,entryHeading_=0,entryProgress_=0;
     int seekIndex_=0;
     const char* reason_="collecting";
     void enter(State,const Input&,const char*);

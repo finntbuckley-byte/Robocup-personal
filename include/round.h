@@ -1,8 +1,8 @@
 #ifndef __ROUND_H
 #define __ROUND_H
 // ============================================================================
-//  round.h  -  the 2-minute competition round: start trigger (GO button, or
-//  auto-start while it isn't wired), round timer, and the on-board target
+//  round.h  -  timed competition or unlimited arena run: GO start/latched stop,
+//  automatic start only while the button isn't wired, round timer, and the on-board target
 //  cap from the rules (max 3 targets on board at the end).
 //
 //  WAITING -> RUNNING -> OVER. Motors must be stopped in WAITING and OVER -
@@ -24,12 +24,11 @@ unsigned long roundElapsedMs();   // 0 until started
 int  targetsOnBoard();            // successful pickups not yet delivered
 void noteCollected();             // third requests return, retaining magnet hold
 void roundAcknowledgeReturn();    // consume the late-round trigger once
-void noteDelivered(int n);        // for the (future) DELIVER state
+void noteDelivered(int n);        // after unloading and confirmed gate closure
 
-// false once the cap is reached or it's late in the round - navigation
-// stops approaching/picking up new weights
+// Requires floor colour and no return request; timed mode also reserves pickup time.
 bool roundWantsWeights();
-// true late in the round or at the cap - where RETURN_HOME would kick in
+// true with a load: at capacity, on own home colour, or the timed return trigger
 bool roundWantsHome();
 
 const char* roundPhaseName();

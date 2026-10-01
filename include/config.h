@@ -481,7 +481,7 @@ const int SCAN_CLEAR_MM = 600;
 // TODO(verify) on the floor: creep speed/time, reverse distance.
 // ---------------------------------------------------------------------------
 const unsigned long INDUCTIVE_CONFIRM_MS = 60;    // metal must read steadily this long
-const int  CREEP_START_MM   = 200;   // candidate lost closer than this -> creep, not give up
+const int  CREEP_START_MM   = 250;   // slow final approach; centre/close-lost target enters creep
 const int  CREEP_SPEED_PCT  = 30;
 const unsigned long CREEP_MAX_MS = 1000;   // no metal by then -> REJECT
 const int  MAX_PICKUP_TRIES = 3; // total attempts per target, not three retries
@@ -626,8 +626,8 @@ const unsigned long PICKUP_TIMEOUT_MS = 8000;
 const int  PIN_GO           = 14;
 const bool GO_ACTIVE_LOW    = false;
 const unsigned long GO_DEBOUNCE_MS      = 50;
-// BENCH/FLOOR TESTING ONLY: a 2nd GO press during a round ends it (motors
-// soft-stop, round OVER). Lets you stop an untethered test without USB.
+// BENCH/FLOOR TESTING ONLY: a 2nd GO press latches stop until reset.
+// Drive/arm stop; the existing magnet command is retained to hold any weight.
 // TODO(competition): set false - no human intervention is allowed, and a
 // stray press must never end a real round.
 const bool GO_STOPS_ROUND = true;
@@ -635,6 +635,12 @@ const unsigned long AUTO_START_DELAY_MS = 3000;
 
 const unsigned long ROUND_MS        = 120000;
 const unsigned long ROUND_END_MARGIN_MS = 1500;  // stop this early - finish still
+// Current arena testing runs until GO is pressed again. Set to 1 for timed rounds.
+#ifndef ROUND_TIME_LIMIT_ENABLED
+#define ROUND_TIME_LIMIT_ENABLED 0
+#endif
+static_assert(ROUND_TIME_LIMIT_ENABLED || GO_STOPS_ROUND,
+              "Unlimited arena testing requires the GO stop button");
 // late-round: stop collecting and head home. Only applies once homing
 // exists (USE_HOMING 1) - without it, stopping early just wastes pickups,
 // since anything on board still scores 1x.
@@ -643,13 +649,22 @@ const unsigned long ROUND_END_MARGIN_MS = 1500;  // stop this early - finish sti
 constexpr bool HOMING_MOVEMENT_ONLY = false;
 // Return travel uses CRUISE_SPEED_PCT / TURN_SPEED_PCT from normal navigation.
 constexpr int HOME_EXIT_SPEED = 70, HOME_DELIVERY_TURN_SPEED = 100;
+// Advance from the colour-confirmation position along the arrival heading,
+// measured by encoders + IMU. End early if a nearby obstacle blocks entry.
+constexpr float HOME_ENTRY_DISTANCE_MM = 150.0f;
+constexpr int HOME_ENTRY_SPEED = 70, HOME_ENTRY_MAX_STEER = 20;
+constexpr float HOME_ENTRY_HEADING_KP = 1.0f;
 // Roughly restore the recorded starting orientation, then confirm at rest.
 constexpr float HOME_DELIVERY_HEADING_TOLERANCE_DEG = 10.0f;
-// Home colour must still match for 600 ms; encoders only bound the base region.
-constexpr float HOME_ARRIVAL_RADIUS_MM = 600.0f;
+// Own home colour must still match for 600 ms; position steers the return but
+// cannot veto delivery when the robot finds its actual base incidentally.
 // TODO(verify): validate these return-only detour distances in the arena.
 constexpr float HOME_DETOUR_PASS_MM = 350.0f;
 constexpr unsigned long HOME_DETOUR_CLEAR_MS = 500;
+constexpr unsigned long HOME_MIN_TURN_MS = 400; // collection retains MIN_TURN_MS
+constexpr float HOME_REPEAT_PROGRESS_MM = 150.0f;
+constexpr unsigned long HOME_REPEAT_WINDOW_MS = 12000;
+constexpr unsigned HOME_REPEAT_CYCLES = 2;
 const unsigned long RETURN_HOME_AT_MS = ROUND_MS - ROUND_END_MARGIN_MS - 30000;
 // rules: >3 targets on board = -1 each. Stop collecting at the cap.
 const int MAX_TARGETS_ON_BOARD = 3;

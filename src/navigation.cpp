@@ -136,6 +136,8 @@ static void setMode(int m) { mode = m; modeStart = millis(); }
 
 static bool homeAligning = false;
 static home::Detour homeDetour(HOME_DETOUR_PASS_MM, HOME_DETOUR_CLEAR_MS);
+static home::Repetition homeRepetition(HOME_REPEAT_PROGRESS_MM, HOME_REPEAT_WINDOW_MS, HOME_REPEAT_CYCLES);
+static int chooseHomeTurn(int suggested);
 static float holdTarget = 0;         // heading FORWARD is holding (imu.h: + = right)
 
 // After giving up on a weight (grab missed MAX_PICKUP_TRIES times, or the
@@ -205,6 +207,13 @@ const char* modeName()
 // direction. The second such flip escalates to ESCAPE (reverse + spin).
 static void requestTurn(int dir)
 {
+  if (homingNavigating())
+  {
+    dir = chooseHomeTurn(dir);
+    lastTurn = dir; flipCount = 0;
+    setMode(dir < 0 ? MODE_TURN_LEFT : MODE_TURN_RIGHT);
+    return;
+  }
   if (lastTurn != 0 && dir != lastTurn && (millis() - lastTurnEnd) < FLIP_WINDOW_MS)
   {
     flipCount++;
@@ -213,7 +222,6 @@ static void requestTurn(int dir)
   else
     flipCount = 0;
 
-  if (homingNavigating()) dir = homeDetour.choose(dir);
   if (flipCount >= FLIPS_BEFORE_ESCAPE)
   {
     escapeSpinDir = lastTurn;
@@ -242,6 +250,29 @@ static bool rightOpen()     { return x8Fresh() && isOpen(x8RightMM()); }
 // spin toward whichever half has more room
 static int roomierSide() { return room(x8RightMM()) >= room(x8LeftMM()) ? +1 : -1; }
 static inline bool clearForScan(uint16_t mm) { return mm == 0 || mm > SCAN_CLEAR_MM; }
+
+static int chooseHomeTurn(int suggested)
+{
+  int direction = homeDetour.choose(suggested);
+  if (homeRepetition.repeated())
+  {
+    const int alternative = -direction;
+    const bool open = alternative > 0 ? rightOpen() : leftOpen();
+    const bool sideBlocked = alternative > 0 ? sideNearRight() : sideNearLeft();
+    if (open && !sideBlocked)
+    {
+      direction = alternative;
+      homeDetour.redirect(direction);
+      homeRepetition.redirected();
+      homeAligning = false;
+      Serial.printf("HOME_REPEAT recovery direction=%s: two avoidance cycles with little movement\n",
+                    direction > 0 ? "right" : "left");
+    }
+    else
+      Serial.println("HOME_REPEAT detected: opposite side not clear; keep avoiding");
+  }
+  return direction;
+}
 
 // APPROACH progress check (see config.h APPROACH_PROGRESS_MS)
 static uint16_t approachRefDist = 0;
@@ -340,6 +371,7 @@ void navigationInit()
 {
   homeAligning = false;
   homeDetour.reset();
+  homeRepetition.reset();
   lastTurn = 0; flipCount = 0;
   lastFindOrEvent = millis();
   setMode(MODE_FORWARD);
@@ -355,6 +387,10 @@ void navigationUpdate()
   // Collection keeps its existing FSM. Homing adds commitment after avoidance
   // so direct-home steering cannot immediately turn back into the obstacle.
   const bool goingHome = homingNavigating();
+  const unsigned long minTurnMs = goingHome ? HOME_MIN_TURN_MS : MIN_TURN_MS;
+  if (goingHome)
+    homeRepetition.update(millis(), mode == MODE_TURN_LEFT || mode == MODE_TURN_RIGHT || mode == MODE_ESCAPE,
+                          poseXmm(), poseYmm());
 
   // ================= decide =================
   switch (mode)
@@ -366,7 +402,7 @@ void navigationUpdate()
       else if (obstacleLeft() && obstacleRight())
       {
         escapeSpinDir = roomierSide();
-        if (goingHome) escapeSpinDir = homeDetour.choose(escapeSpinDir);
+        if (goingHome) escapeSpinDir = chooseHomeTurn(escapeSpinDir);
         escapeSpinMs  = ESCAPE_SPIN_MS;
         setMode(MODE_ESCAPE);
       }
@@ -400,7 +436,7 @@ void navigationUpdate()
       // stale 8x8: can't see whether it's open, so end on time. Otherwise end
       // only when the blocked side is open AND the other side isn't close
       // (else FORWARD would immediately start the opposite turn)
-      else if (held > MIN_TURN_MS && ((leftOpen() && !obstacleRight()) || !x8Fresh()))
+      else if (held > minTurnMs && ((leftOpen() && !obstacleRight()) || !x8Fresh()))
       {
         lastTurnEnd = millis();
         setMode(MODE_FORWARD);
@@ -414,7 +450,7 @@ void navigationUpdate()
         escapeSpinMs  = ESCAPE_SPIN_MS + 800;
         setMode(MODE_ESCAPE);
       }
-      else if (held > MIN_TURN_MS && ((rightOpen() && !obstacleLeft()) || !x8Fresh()))
+      else if (held > minTurnMs && ((rightOpen() && !obstacleLeft()) || !x8Fresh()))
       {
         lastTurnEnd = millis();
         setMode(MODE_FORWARD);
@@ -739,6 +775,10 @@ void navigationUpdate()
         steer = (weightSide < 0) ? -ONE_SIDE_ARC_PCT : +ONE_SIDE_ARC_PCT;
         approachErrPrev = 0;
       }
+      // Slow before contact even while a crossed lower beam still sees the
+      // weight. Retain centring corrections until the ordinary creep handoff.
+      if (weightFound && weightDistMM > 0 && weightDistMM < CREEP_START_MM)
+        speed = CREEP_SPEED_PCT;
       drive(speed + steer, speed - steer);
       break;
     }

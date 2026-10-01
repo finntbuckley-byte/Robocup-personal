@@ -1,25 +1,39 @@
 # Robogooners
 
-## Current robot firmware: V10 homing integration
+## Current robot firmware: V13 home advance
 
-The default PlatformIO environment is `nav` (Teensy 4.0). This is the V10
-`HOMING_V10_START_HEADING` version reported to run well in the arena on
-2 October 2026. See [delivery behaviour and field checks](HOMING%20V10%20START%20HEADING.md).
+The default PlatformIO environment is `nav` (Teensy 4.0). V13
+`HOMING_V13_HOME_ADVANCE` was uploaded and confirmed by passive serial readback
+on 2 October 2026. See [V13 behaviour and limitations](HOMING%20V13%20HOME%20ADVANCE.md)
+and [upload evidence](docs/firmware-evidence/v13-upload-confirmation.log).
 
 - Capture home colour and IMU orientation at GO each round.
-- Return with three collected weights or at the existing late-round trigger.
-- Confirm home, align to the recorded starting heading, open the gate to empty
-  storage, then release the held third weight.
-- Confirm gate closure, leave the base, and resume collection while round time
-  and floor-colour checks permit. No fixed timeout on return travel.
+- Return with three collected weights, a nonempty load at the one-shot late
+  trigger, or a nonempty load when encountering own home colour.
+- Confirm home, advance 150 mm along the arrival heading (shortened for an
+  obstacle), then align to the recorded starting heading and reconfirm colour.
+- Open the gate to empty storage, then release the held third weight.
+- Confirm gate closure, leave the base, and resume collection on floor colour.
+  Run without a two-minute cutoff until GO is pressed again; stop stays latched
+  until reset and preserves the magnet command. No fixed return timeout.
+- Retain V11 earlier creep, 400 ms homing minimum turns and repetition recovery.
 
 Build: `pio run -e nav`. Upload: `pio run -e nav -t upload`.
 Native software checks (PowerShell with g++): `./tools/test_homing.ps1`.
-Before this snapshot, the build and all 21 integration scenarios passed,
-including delivery followed by another pickup. Physical landing position still
-requires observation; there is no sensor confirming weights have left storage.
+V13 built successfully; its new advance phase has not been tested in software
+or physically. V12 passed all 32 integration scenarios before that phase was
+added. Existing delivery fixtures need to simulate the new advance before
+expecting alignment; those earlier results do not establish V13 test success.
+There is no sensor confirming weights have left storage.
 
-The earlier working firmware remains in commit `f35ba75`.
+Colour recovery after alignment is [a plan only](HOME%20COLOUR%20RECOVERY%20PLAN.md).
+V13 still waits stationary if home colour is lost after alignment.
+
+Uploaded firmware HEX SHA-256:
+`06D540337A0A437175EF8CF9A8AC0D656A3CB3E7FD9CF07A979E8E318810154D`.
+
+The confirmed V10 homing version remains in commit `8e15896`; the earlier
+pre-homing round version remains in `f35ba75`.
 
 
 

@@ -25,5 +25,19 @@ int main() {
     d.choose(-1);d.update(UINT32_MAX-100,false,true,0,0,0);
     d.update(399,false,true,400,0,0);assert(!d.active()); // timer wrap
     d.choose(1);d.reset();assert(!d.active() && !d.passing());
+    home::Repetition r(150,12000,2);
+    r.update(100,true,0,0);r.update(600,false,0,0);assert(!r.repeated());
+    r.update(700,true,20,0);r.update(1200,false,20,0);assert(r.repeated());
+    r.redirected();assert(!r.repeated());
+    r.update(14000,true,20,0);r.update(15000,false,20,0);
+    assert(!r.repeated()); // no second reversal just because time elapsed
+    r.update(15100,true,170,0);r.update(15600,false,170,0);
+    r.update(15700,true,170,0);r.update(16200,false,170,0);assert(r.repeated());
+    r.reset();r.update(0,true,0,0);r.update(500,false,0,0);
+    r.update(13000,true,0,0);r.update(13500,false,0,0);assert(!r.repeated());
+    r.reset();r.update(0,true,0,0);r.update(10000,true,0,0);assert(!r.repeated()); // one long turn
+    r.reset();r.update(UINT32_MAX-1000,true,0,0);r.update(UINT32_MAX-500,false,0,0);
+    r.update(0,true,0,0);r.update(500,false,0,0);assert(r.repeated());
+    r.reset();r.update(0,true,0,0);r.update(500,false,151,0);assert(!r.repeated()); // real progress
     std::cout<<"PASS return detour: commitment, translation, fresh clearance, re-obstacle, reset, timer wrap\n";
 }
