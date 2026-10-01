@@ -10,6 +10,9 @@
 #include "funnel_sensor.h"   // inductiveMetalNow()
 #include "imu.h"
 #include "odometry.h"        // odomStalled() for the APPROACH progress check
+#include "homing.h"
+#include "home_detour.h"
+#include "pose.h"
 
 // ============================================================================
 //  navigation.cpp  -  built only by [env:nav] (see platformio.ini).
@@ -107,7 +110,6 @@ static int  rejectDir = 1;
 static int  rejectCount = 0;
 static unsigned long metalSince = 0;
 #if USE_LYING_WEIGHT_REJECT
-static unsigned long lyingSince = 0;        // mismatch start (0 = none) - updated EVERY loop
 static bool creepNotchSeen = false;         // this CREEP has had the notch ToF see something
 static unsigned long notchIgnoreUntil = 0;  // after a REJECT: notch can't restart CREEP until then
 #endif
@@ -132,6 +134,8 @@ NavTuning &navTuning() { return tuning; }
 
 static void setMode(int m) { mode = m; modeStart = millis(); }
 
+static bool homeAligning = false;
+static home::Detour homeDetour(HOME_DETOUR_PASS_MM, HOME_DETOUR_CLEAR_MS);
 static float holdTarget = 0;         // heading FORWARD is holding (imu.h: + = right)
 
 // After giving up on a weight (grab missed MAX_PICKUP_TRIES times, or the
@@ -140,6 +144,8 @@ static float holdTarget = 0;         // heading FORWARD is holding (imu.h: + = r
 // (jammed, can't be gripped) restarts the pickup forever. Seen on blocks 28/9:
 // gave up, back to FORWARD, same weight -> 3rd pickup immediately.
 static unsigned long pickupCycleStart = 0;   // this crane cycle's start
+static bool pickupVerifying = false, pickupClearTracking = false;
+static unsigned long pickupVerifyAt = 0, pickupClearAt = 0, pickupSampleAt = 0;
 static unsigned long metalLeftAt = 0;        // first moment the notch read clear in it (0 = not yet)
 static bool metalLockout = false;
 static unsigned long metalClearSince = 0;
@@ -163,48 +169,11 @@ static bool metalConfirmed()
 static int roomierSide();
 
 #if USE_LYING_WEIGHT_REJECT
-// TOF_TOP (baseplate-top - see config.h) is bench-confirmed blind to a
-// weight lying on its side; TOF_UPRIGHT (the notch ToF) still sees it. So
-// bottom-sees-something + top-sees-nothing means "an object is here but
-// not standing up" - but top only sees an UPRIGHT weight once it's nearly
-// fully seated, so "bottom present, top absent" is also the NORMAL state
-// for most of a real weight's approach. A fixed short timeout can't tell
-// "still arriving" from "lying down" - only patience can: this resets the
-// instant top gets ANY valid reading (active evidence of arrival), and
-// only confirms a mismatch after it's stayed unresolved for
-// navTuning().lyingConfirmMs. A secondary numeric check (both valid but
-// >lyingDiscrepancyMm apart) catches a partial/angled top return. If
-// either sensor isn't up (not fitted, stale, mid-recovery) this never
-// fires, rather than treating "no sensor" as "definitely lying down" -
-// that's what caused real weights to get rejected before.
-//
-// RE-ENABLED 2026-09-29 (USE_LYING_WEIGHT_REJECT in config.h). 2026-09-29
-// integration: now matches stack_test.cpp line for line - 0 < mm < ceiling
-// presence (0 = nothing, far-field = nothing), the timer updated every loop
-// by updateLyingMismatch() (it went stale between the modes that asked
-// before), and only acted on in CREEP. Tune live with ':disc'/':lconf'.
+// Notch sensing still assists creep. The top sensor is now solely a centre
+// weight detector in weight_detect.cpp; it never rejects lying weights.
 static bool notchPresent() { return tofOk(TOF_UPRIGHT) && tofUpright > 0 && tofUpright < LYING_NOTCH_MAX_MM; }
-static bool topPresent()   { return tofOk(TOF_TOP)     && tofTop     > 0 && tofTop     < LYING_TOP_MAX_MM; }
-
-// call once per navigationUpdate(), whatever the mode
-static void updateLyingMismatch()
-{
-  // a sensor that isn't up (unfitted/stale/recovering) never counts as "lying"
-  if (!tofOk(TOF_TOP) || !tofOk(TOF_UPRIGHT)) { lyingSince = 0; return; }
-
-  bool np = notchPresent(), tp = topPresent();
-  int diff = (np && tp) ? abs((int)tofUpright - (int)tofTop) : -1;
-  bool mismatchNow = np && (!tp || diff > tuning.lyingDiscrepancyMm);
-
-  if (!mismatchNow)        lyingSince = 0;
-  else if (lyingSince == 0) lyingSince = millis();
-}
-
-static bool lyingWeightConfirmed()
-{
-  return REJECT_FROM_TOP_NOTCH_MISMATCH && lyingSince != 0 &&
-         millis() - lyingSince >= tuning.lyingConfirmMs;
-}
+static bool centreNear() { return weightCentreActive && weightDistMM < CREEP_START_MM; }
+static bool intakePresent() { return notchPresent() || centreNear(); }
 
 // the notch ToF sees something to creep onto (stack_test: SEARCH -> CREEP)
 static bool notchCandidate() { return notchPresent() && millis() >= notchIgnoreUntil; }
@@ -244,6 +213,7 @@ static void requestTurn(int dir)
   else
     flipCount = 0;
 
+  if (homingNavigating()) dir = homeDetour.choose(dir);
   if (flipCount >= FLIPS_BEFORE_ESCAPE)
   {
     escapeSpinDir = lastTurn;
@@ -313,7 +283,7 @@ static void startApproach()
 static void startCreep()
 {
 #if USE_LYING_WEIGHT_REJECT
-  creepNotchSeen = notchPresent();
+  creepNotchSeen = intakePresent();
 #endif
   setMode(MODE_CREEP);
 }
@@ -341,12 +311,10 @@ static void startReject(const char *why)
   setMode(MODE_REJECT);
 }
 
-// end of a REJECT. The lying-mismatch timer kept running while the object was
-// in view - clear it, or the next CREEP would fire an instant second REJECT.
+// End of a REJECT: suppress the notch briefly before trying again.
 static void finishReject()
 {
 #if USE_LYING_WEIGHT_REJECT
-  lyingSince = 0;
   // the object may still be in view of the notch - don't creep straight back onto it
   notchIgnoreUntil = millis() + NOTCH_IGNORE_MS;
 #endif
@@ -370,6 +338,8 @@ static bool avoidIfBlocked()
 
 void navigationInit()
 {
+  homeAligning = false;
+  homeDetour.reset();
   lastTurn = 0; flipCount = 0;
   lastFindOrEvent = millis();
   setMode(MODE_FORWARD);
@@ -378,18 +348,13 @@ void navigationInit()
 // ---------------------------------------------------------------------------
 void navigationUpdate()
 {
+  if (homingUpdate(mode == MODE_PICKUP)) return;
   unsigned long held = millis() - modeStart;
-  bool wantWeights = roundWantsWeights();
-#if USE_LYING_WEIGHT_REJECT
-  updateLyingMismatch();   // every loop, like stack_test - never a stale timer
-#endif
+  bool wantWeights = roundWantsWeights() && !homingNavigating();
 
-  // IMU HOOK: once the IMU is back, roundWantsHome() is where a RETURN_HOME
-  // mode takes over - heading back toward the start corner (heading zeroed at
-  // roundJustStarted()), then a DELIVER mode opens the rear flap and calls
-  // noteDelivered(). Until then the robot keeps roaming and avoiding, but
-  // stops collecting (see wantWeights) so it never exceeds the 3-target cap.
-  // BEACON HOOK: fallback homing on an IR beacon slots in the same place.
+  // Collection keeps its existing FSM. Homing adds commitment after avoidance
+  // so direct-home steering cannot immediately turn back into the obstacle.
+  const bool goingHome = homingNavigating();
 
   // ================= decide =================
   switch (mode)
@@ -401,6 +366,7 @@ void navigationUpdate()
       else if (obstacleLeft() && obstacleRight())
       {
         escapeSpinDir = roomierSide();
+        if (goingHome) escapeSpinDir = homeDetour.choose(escapeSpinDir);
         escapeSpinMs  = ESCAPE_SPIN_MS;
         setMode(MODE_ESCAPE);
       }
@@ -481,7 +447,7 @@ void navigationUpdate()
 
       if (metalConfirmed()) { pickupTries = 0; startPickup(); break; }
 #if USE_LYING_WEIGHT_REJECT
-      if (notchCandidate()) { startCreep(); break; }   // reached the notch - creep + confirm (stack_test)
+      if (notchCandidate() || centreNear()) { startCreep(); break; }   // reached the notch - creep + confirm (stack_test)
 #endif
 
       if (odomStalled() && held > APPROACH_PROGRESS_MS) { abandonApproach("tracks stalled"); break; }
@@ -518,15 +484,13 @@ void navigationUpdate()
       if (!wantWeights) { setMode(MODE_FORWARD); break; }
       if (metalConfirmed()) { pickupTries = 0; startPickup(); break; }
 #if USE_LYING_WEIGHT_REJECT
-      // same order as stack_test's CREEP: metal wins, then a confirmed
-      // mismatch, then the candidate leaving, then the hard cap. No
+      // Metal wins, then candidate loss, then the hard cap. No
       // re-acquire -> APPROACH once the notch has it: APPROACH would hand
       // straight back to CREEP and restart the cap every bounce.
-      if (notchPresent()) creepNotchSeen = true;
-      if (lyingWeightConfirmed()) { startReject("lying weight - notch sees it, top never did"); break; }
+      if (intakePresent()) creepNotchSeen = true;
       if (creepNotchSeen)
       {
-        if (!notchPresent()) { lastFindOrEvent = millis(); setMode(MODE_FORWARD); break; }   // left the notch FoV
+        if (!intakePresent()) { lastFindOrEvent = millis(); setMode(MODE_FORWARD); break; }   // left the notch FoV
         if (held > tuning.creepCapMs) startReject("creep hard cap - no metal (dummy?)");
         break;
       }
@@ -537,63 +501,86 @@ void navigationUpdate()
       break;
 
     case MODE_PICKUP:
+    {
+      const unsigned long now = millis();
+      const bool metalNow = inductiveMetalNow(); // one consistent sample for this decision
       if (!pickupStarted)
       {
-        collection_start(pickupIsThird);      // partner's crane/magnet FSM
+        collection_start(pickupIsThird);
         pickupStarted = true;
         pickupTries++;
-        pickupCycleStart = millis();
+        pickupCycleStart = now;
+        pickupVerifying = pickupClearTracking = false;
         metalLeftAt = 0;
+        driveHardStop();
       }
-      // DATA ONLY (no behaviour change yet): when did the metal first leave
-      // the notch? Real lifts 28/9 held metal steadily on the way down and
-      // only lost it ~1.2s in (the lift). A weight pushed out by the arm would
-      // leave EARLIER. Floor logs decide the cut-off / whether option 3 (a
-      // crane "lift started" signal) is needed.
-      if (pickupStarted && metalLeftAt == 0 && !inductiveMetalNow())
-        metalLeftAt = millis();
-      else if (!collection_busy() || held > PICKUP_TIMEOUT_MS)
+      // First departure is telemetry only, not proof that the pickup succeeded.
+      if (metalLeftAt == 0 && !metalNow) metalLeftAt = now;
+
+      const bool timedOut = collection_busy() && now - pickupCycleStart > PICKUP_TIMEOUT_MS;
+      if (collection_busy() && !timedOut) break;
+      if (timedOut) collection_stop_motion(); // never drive away with a timed-out arm moving
+
+      if (!pickupVerifying)
       {
-        pickupAttempts++;
-        bool timedOut = held > PICKUP_TIMEOUT_MS;
-        bool stillThere = inductiveMetalNow();   // metal still in the notch = the grab missed
-
-        Serial.print(">>> PICKUP ATTEMPT #"); Serial.print(pickupAttempts);
-        if (timedOut)        Serial.print(" - TIMED OUT waiting for crane");
-        else if (stillThere) Serial.print(" - MISSED (metal still in the notch)");
-        else                 Serial.print(" - OK (weight gone from the notch)");
-        Serial.print(", metal left at ");
-        if (metalLeftAt) { Serial.print((metalLeftAt - pickupCycleStart) / 1000.0f, 2); Serial.println(" s"); }
-        else               Serial.println("never");
-
-        if (!timedOut && stillThere && pickupTries < MAX_PICKUP_TRIES)
-        {
-          pickupStarted = false;          // retry in place
-          modeStart = millis();
-          break;
-        }
-        if (!timedOut && !stillThere)
-        {
-          noteCollected();
-          if (roundOver())
-          {
-            driveHardStop();
-            return; // no reposition, homing, further pickup or magnet release
-          }
-        }
-        else
-        {
-          metalLockout = true;            // leave this weight behind before triggering again
-          metalClearSince = 0;
-          Serial.println(">>> giving up on this weight - trigger locked until the notch is clear");
-        }
-
-        suppressTargetFor(TARGET_SUPPRESS_MS);
-        lastFindOrEvent = millis();
-        lastTurn = 0; flipCount = 0;
-        setMode(MODE_REPOSITION);
+        pickupVerifying = true;
+        pickupVerifyAt = pickupSampleAt = now;
+        pickupClearTracking = false;
+        Serial.printf(">>> PICKUP_VERIFY target_try=%d/%d metal=%d\n",
+                      pickupTries, MAX_PICKUP_TRIES, metalNow);
       }
+      if (metalNow || now - pickupSampleAt > PICKUP_VERIFY_MAX_SAMPLE_GAP_MS)
+        pickupClearTracking = false;
+      if (!metalNow && !pickupClearTracking)
+      {
+        pickupClearTracking = true;
+        pickupClearAt = now;
+      }
+      pickupSampleAt = now;
+      const unsigned long clearMs = pickupClearTracking ? now - pickupClearAt : 0;
+      const bool confirmed = !timedOut && !metalNow && pickupClearTracking &&
+                             now - pickupVerifyAt >= PICKUP_VERIFY_MIN_MS &&
+                             clearMs >= PICKUP_CLEAR_CONFIRM_MS;
+      if (!timedOut && !confirmed && now - pickupVerifyAt < PICKUP_VERIFY_TIMEOUT_MS)
+      {
+        driveHardStop();
+        break;
+      }
+
+      pickupAttempts++;
+      Serial.printf(">>> PICKUP_RESULT attempt=%d target_try=%d/%d result=%s metal=%d clear_ms=%lu first_clear_ms=%lu\n",
+                    pickupAttempts, pickupTries, MAX_PICKUP_TRIES,
+                    timedOut ? "CRANE_TIMEOUT" : (confirmed ? "CONFIRMED" : "MISSED_OR_UNCONFIRMED"),
+                    metalNow, clearMs, metalLeftAt ? metalLeftAt - pickupCycleStart : 0);
+      if (!confirmed && !timedOut && pickupTries < MAX_PICKUP_TRIES && !roundWantsHome())
+      {
+        pickupStarted = false;
+        modeStart = now;
+        driveHardStop();
+        Serial.println(">>> RETRY same target: remain stopped, repeat pickup");
+        break;
+      }
+      if (confirmed) noteCollected();
+      else
+      {
+        metalLockout = true;
+        metalClearSince = 0;
+        Serial.println(roundWantsHome()
+            ? ">>> pickup unconfirmed: late return takes priority over another retry"
+            : ">>> giving up on this target: no count; trigger locked until notch clear");
+      }
+      if (roundOver() || roundWantsHome())
+      {
+        driveHardStop();
+        setMode(MODE_FORWARD);
+        return;
+      }
+      suppressTargetFor(TARGET_SUPPRESS_MS);
+      lastFindOrEvent = now;
+      lastTurn = 0; flipCount = 0;
+      setMode(MODE_REPOSITION);
       break;
+    }
 
     case MODE_REJECT:
     {
@@ -653,6 +640,24 @@ void navigationUpdate()
       break;
   }
 
+  if (goingHome)
+  {
+    const bool avoiding = mode == MODE_TURN_LEFT || mode == MODE_TURN_RIGHT || mode == MODE_ESCAPE;
+    const bool wasPassing = homeDetour.passing();
+    const bool wasActive = homeDetour.active();
+    homeDetour.update(millis(), avoiding, leftOpen() && rightOpen() &&
+                      !sideNearLeft() && !sideNearRight(),
+                      poseXmm(), poseYmm(), imuHeadingDeg());
+    if (homeDetour.passing() && !wasPassing)
+    {
+      homeAligning = false;
+      headingHoldReset();
+      Serial.printf("HOME_DETOUR pass heading=%.1f distance=%.0f\n", homeDetour.heading(), HOME_DETOUR_PASS_MM);
+    }
+    if (wasActive && !homeDetour.active())
+      Serial.println("HOME_DETOUR clear and translated; resume home bearing");
+  }
+
   // ================= act =================
   switch (mode)
   {
@@ -662,8 +667,25 @@ void navigationUpdate()
       int steer = cautionVeer();
       if (sideNearLeft())  steer += SIDE_NUDGE_PCT;
       if (sideNearRight()) steer -= SIDE_NUDGE_PCT;
-      // heading hold: steering on purpose (or just out of a turn) re-aims it
-      if (USE_HEADING_HOLD && imuOk())
+      // Obstacle veer and side nudges outrank the home bearing. Large bearing
+      // errors use the proven pivot speeds; hysteresis prevents turn chatter.
+      if (goingHome && imuOk() && x8Fresh() && steer == 0)
+      {
+        const float target = homeDetour.passing() ? homeDetour.heading() : homingTargetHeading();
+        const float error = wrap180(target - imuHeadingDeg());
+        if (homeDetour.passing()) homeAligning = false;
+        else if (fabsf(error) > 60) homeAligning = true;
+        if (fabsf(error) < 15) homeAligning = false;
+        if (homeAligning)
+        {
+          if (error > 0) turnRight(); else turnLeft();
+          break;
+        }
+        steer = headingHoldSteer(target);
+      }
+      else if (goingHome) homeAligning = false;
+      // Collection keeps its existing heading-hold behaviour.
+      else if (USE_HEADING_HOLD && imuOk())
       {
         if (steer != 0 || millis() - modeStart < HEADING_HOLD_SETTLE_MS)
           holdTarget = imuHeadingDeg();
@@ -694,8 +716,14 @@ void navigationUpdate()
     case MODE_APPROACH:
     {
       int steer;
+      int speed = APPROACH_SPEED_PCT;
       const uint16_t viewLeft = weightViewLeftMM(), viewRight = weightViewRightMM();
-      if (weightSide == 0 && viewLeft > 0 && viewRight > 0)
+      if (weightCentreActive)
+      {
+        steer = 0; // a centre beam gives range, not a left/right error
+        approachErrPrev = 0;
+      }
+      else if (weightSide == 0 && viewLeft > 0 && viewRight > 0)
       {
         float err  = (float)viewLeft - (float)viewRight;
         float dErr = err - approachErrPrev;
@@ -707,10 +735,11 @@ void navigationUpdate()
       }
       else
       {
+        speed = ONE_SIDE_APPROACH_SPEED_PCT;
         steer = (weightSide < 0) ? -ONE_SIDE_ARC_PCT : +ONE_SIDE_ARC_PCT;
         approachErrPrev = 0;
       }
-      drive(APPROACH_SPEED_PCT + steer, APPROACH_SPEED_PCT - steer);
+      drive(speed + steer, speed - steer);
       break;
     }
 

@@ -28,6 +28,8 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <EEPROM.h>
+#include "homing.h"
+#include "colour.h"
 #include <math.h>
 #include "config.h"
 #include "motor.h"
@@ -393,6 +395,8 @@ static void handleSerial()
       case 'd': tripPrint(); break;
       case 'l': summaryPrintSaved(); break;
       case 't': telemetryOn = !telemetryOn; if (telemetryOn) printTelemetryHeader(); break;
+      case 'c': if (roundWaiting()) colourPrintRaw(); break;
+      case 'v': homingPrintStatus(); break; // read-only firmware identity and live stop reason
       default: break;   // stray Enter etc.
     }
   }
@@ -407,7 +411,7 @@ void setup()
   motor_init();          // neutral pulses straight away
   stopMotors();
   collection_init();     // crane parked at AT_REST, magnets off
-  gate_init();           // Herkulex flap on Serial2 (CON66)
+  if(!HOMING_MOVEMENT_ONLY) gate_init(); // omitted in movement-only test
 
   if (i2cBusClear(I2C0_SDA_PIN, I2C0_SCL_PIN)) Serial.println("!! Wire (I2C0) was stuck - bus cleared");
   if (i2cBusClear(I2C1_SDA_PIN, I2C1_SCL_PIN)) Serial.println("!! Wire1 (I2C1) was stuck - bus cleared");
@@ -415,12 +419,14 @@ void setup()
   Wire1.begin(); Wire1.setClock(400000);
 
   Serial.println("\n--- RoboCup G23 nav build ---");
+  Serial.println("EXPERIMENTAL_HOMING_V10_START_HEADING - home colour plus recorded GO heading, gate first then third");
   tofInit();
   x8Init();              // blocks ~5s setting 8x8 mode
   irSensorsInit();
   odomInit();
   Serial.println(imuInit() ? "IMU ok (BNO055, IMUPLUS)" : "!! IMU not found - no heading hold");
   funnelSensorInit();
+  colourInit();
   roundInit();
 
   printHelp();
@@ -437,23 +443,27 @@ void loop()
   tofUpdate();
   x8Update();
   irSensorsUpdate();
-  odomUpdate();          // after the 8x8 / rear ToF - the slip check reads them
   imuUpdate();
-  poseUpdate();          // x/y from the start (logging only for now)
+  odomUpdate();
+  poseUpdate();
+  colourUpdate();
 
   // 2. weight candidate
   weightDetectUpdate();
 
   // 3. crane FSM - always ticks, navigation just starts/watches it
-  collection_update();
-  gate_update();
+  if (!killed && !roundOver()) collection_update();
+  if (!HOMING_MOVEMENT_ONLY && lastDriveLeftPct()==0 && lastDriveRightPct()==0) gate_update();
 
   // 4. sorting - independent of navigation/collection
   funnelSortUpdate();
 
   // 5. round + navigation
   roundUpdate();
-  if (roundJustStarted()) { navigationInit(); odomReset(); imuZero(); headingHoldReset(); poseReset(); roundTrackReset(); }   // distance + heading from the start position
+  if (roundJustStarted()) {
+    driveHardStop();navigationInit();odomReset();imuZero();headingHoldReset();poseReset();roundTrackReset();
+    homingStartRound();
+  }
 
   // round summary: tracked while running, saved + printed once at ROUND OVER
   static bool wasRunning = false;
@@ -464,12 +474,13 @@ void loop()
   // Five-second launch window after GO, with all normal navigation decisions
   // intact. It never restarts after a stop, collection cycle or sensor dropout.
   driveSetStartupBoost(!killed && roundRunning() && roundElapsedMs() < STARTUP_BOOST_MS);
-  if (killed)             driveHardStop();
+  if (killed || roundOver()) homingStop();
   else if (!roundRunning()) driveHardStop();
   else                           navigationUpdate();
 
   // 6. telemetry
   printTelemetry();
+  homingTelemetry();
   tofPrintRawTick();
 }
 

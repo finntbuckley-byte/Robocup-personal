@@ -15,6 +15,7 @@
 extern bool     weightFound;
 extern int      weightSide;      // -1 left, +1 right, 0 centred/both
 extern uint16_t weightDistMM;
+extern bool weightCentreActive; // confirmed centre-facing top-ToF candidate
 extern int      pickupAttempts;  // telemetry: how many times PICKUP has run
 
 void suppressTargetFor(unsigned long ms);
@@ -23,5 +24,6 @@ void weightDetectUpdate();
 // Fresh ranges by viewing side; raw tofBL/tofBR remain physical telemetry.
 uint16_t weightViewLeftMM();
 uint16_t weightViewRightMM();
+uint16_t weightViewCentreMM();
 
 #endif /* __WEIGHT_DETECT_H */

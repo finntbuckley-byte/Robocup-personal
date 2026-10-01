@@ -1,6 +1,7 @@
 #include "round.h"
 #include "config.h"
 #include "funnel_sensor.h"
+#include "colour.h"
 
 // ============================================================================
 //  round.cpp
@@ -27,6 +28,10 @@ static unsigned long startAt = 0;
 static bool justStarted = false;
 static int deliveredCount = 0;
 static int collectedCount = 0;
+static bool lateReturnConsumed = false;
+void roundAcknowledgeReturn() {
+  if (roundElapsedMs() >= RETURN_HOME_AT_MS) lateReturnConsumed = true;
+}
 
 static unsigned long goDownSince = 0;
 static unsigned long goUpSince = 0;
@@ -64,6 +69,7 @@ static bool goPressed()
 
 void roundInit()
 {
+  collectedCount=deliveredCount=0;lateReturnConsumed=false;
   if (PIN_GO >= 0) pinMode(PIN_GO, GO_ACTIVE_LOW ? INPUT_PULLUP : INPUT);
   initAt = millis();
   phase = PHASE_WAITING;
@@ -143,27 +149,32 @@ void noteCollected()
   collectedCount++;
   Serial.print(">>> TARGET COLLECTED - on board: "); Serial.println(targetsOnBoard());
   if (targetsOnBoard() >= MAX_TARGETS_ON_BOARD)
-  {
-    // The third crane cycle has already parked the arm and left the magnet
-    // at its holding duty. End navigation permanently without releasing it.
-    phase = PHASE_OVER;
-    Serial.println(">>> THREE COLLECTED: stopped in place; holding third weight until power off");
-  }
+    Serial.println(">>> THREE COLLECTED: return home with third held");
 }
 
-void noteDelivered(int n) { deliveredCount += n; }
+void noteDelivered(int n) {
+  if(n<0) return;
+  if(n>targetsOnBoard()) n=targetsOnBoard();
+  deliveredCount += n;
+  roundAcknowledgeReturn();
+  Serial.println(">>> TIMED UNLOAD COMPLETE: load assumed delivered, no exit sensor");
+}
 
 bool roundWantsHome()
 {
   if (targetsOnBoard() >= MAX_TARGETS_ON_BOARD) return true;
 #if USE_HOMING
-  return roundElapsedMs() >= RETURN_HOME_AT_MS;
+  return !lateReturnConsumed && roundElapsedMs() >= RETURN_HOME_AT_MS;
 #else
   return false;    // no homing yet - keep collecting to the cap all round
 #endif
 }
 
-bool roundWantsWeights() { return roundRunning() && !roundWantsHome(); }
+bool roundWantsWeights() {
+  return roundRunning() && !roundWantsHome() &&
+    roundElapsedMs()+PICKUP_TIMEOUT_MS+PICKUP_VERIFY_TIMEOUT_MS+500 < ROUND_MS-ROUND_END_MARGIN_MS &&
+    colourOk() && colourSurface()==COLOUR_FLOOR;
+}
 
 const char* roundPhaseName()
 {

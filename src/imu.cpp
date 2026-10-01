@@ -11,6 +11,8 @@ static float rawDeg = 0;      // BNO heading, 0-360
 static float zeroDeg = 0;
 static float rateDps = 0;
 static uint8_t gyroCal = 0;
+static uint32_t lastValidAt = 0;
+static bool dataValid = false;
 
 static float wrap180(float d)
 {
@@ -56,7 +58,7 @@ static float wrap180(float d);
 // true = the chip is in IMUPLUS and its data can be trusted this read
 static bool checkMode()
 {
-  if (!readReg(BNO_REG_OPR_MODE, oprMode)) { oprMode = 0xFE; return false; }   // no answer (mid-reboot)
+  if (!readReg(BNO_REG_OPR_MODE, oprMode)) { oprMode = 0xFE; return false; }
   if (oprMode == BNO_MODE_IMUPLUS) return millis() >= recoverUntil;
 
   resetCount++;
@@ -71,13 +73,34 @@ static bool checkMode()
 static void read()
 {
   static bool rezero = false;
-  if (!checkMode()) { rezero = true; return; }   // keep last values while it's rebooting / switching
+  const int resetsBefore=resetCount;
+  const bool modeValid=checkMode();
+  // A failed I2C read is not proof of a reset. Re-zero only after an actual
+  // non-IMUPLUS mode was observed, otherwise rotation during a dropout is lost.
+  if(resetCount!=resetsBefore) rezero=true;
+  if (!modeValid) {
+      // A single failed transfer is not a reset. The last good sample remains
+      // usable only within imuOk()'s bounded freshness window.
+      if(oprMode != 0xFE) dataValid = false;
+      return;
+  }
 
-  sensors_event_t e;
-  bno.getEvent(&e, Adafruit_BNO055::VECTOR_EULER);
-  rawDeg = e.orientation.x;
-  bno.getEvent(&e, Adafruit_BNO055::VECTOR_GYROSCOPE);
-  rateDps = IMU_GYRO_SIGN * e.gyro.z * 57.2958f;   // + = turning right
+  // Explicit transfer checks; the library getEvent API does not report a
+  // failed vector read reliably enough to authorize autonomous homing.
+  // 0x18/19 = gyro Z; 0x1A/1B = Euler heading. The following registers
+  // are roll and pitch, NOT heading. Keep the burst limited to these four.
+  uint8_t values[4];
+  IMU_WIRE.beginTransmission(IMU_ADDR);
+  IMU_WIRE.write(Adafruit_BNO055::BNO055_GYRO_DATA_Z_LSB_ADDR);
+  if(IMU_WIRE.endTransmission(false)!=0 || IMU_WIRE.requestFrom(IMU_ADDR,uint8_t(4))!=4) {
+      return;
+  }
+  for(auto &v:values) v=IMU_WIRE.read();
+  const float heading = uint16_t(values[2] | (values[3]<<8)) / 16.0f;
+  if(heading>=360) return; // retain the last valid sample, never a corrupt angle
+  rawDeg = heading;
+  rateDps = IMU_GYRO_SIGN * int16_t(values[0] | (values[1]<<8)) / 16.0f;
+  dataValid=true; lastValidAt=millis();
   uint8_t s, a, m;
   bno.getCalibration(&s, &gyroCal, &a, &m);
 
@@ -96,8 +119,8 @@ int     imuResetCount() { return resetCount; }
 
 bool imuInit()
 {
-  IMU_WIRE.beginTransmission(IMU_ADDR);
-  if (IMU_WIRE.endTransmission() != 0) { ok = false; return false; }
+  uint8_t chip=0;
+  if (!readReg(0x00,chip) || chip!=0xA0) { ok = false; return false; }
   ok = bno.begin(OPERATION_MODE_IMUPLUS);
   if (ok) { delay(50); read(); zeroDeg = rawDeg; }
   return ok;
@@ -111,8 +134,8 @@ void imuUpdate()
   read();
 }
 
-void imuZero()          { if (ok) { read(); zeroDeg = rawDeg; } }
-bool imuOk()            { return ok; }
+void imuZero()          { if (ok) { read(); if(imuOk()) {zeroDeg = rawDeg;lastGoodHeading=0;} } }
+bool imuOk()            { return ok && dataValid && millis()-lastValidAt<150; }
 float imuHeadingDeg()   { return ok ? wrap180(IMU_HEADING_SIGN * (rawDeg - zeroDeg)) : 0.0f; }
 float imuRateDps()      { return ok ? rateDps : 0.0f; }
 uint8_t imuGyroCal()    { return gyroCal; }

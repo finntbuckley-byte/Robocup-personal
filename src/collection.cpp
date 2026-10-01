@@ -48,11 +48,33 @@ enum CollectionState
 
 static CollectionState state = COLLECTION_IDLE;
 static bool holdAtRestArmed = false;   // this cycle's collection_start(true) request
+static bool carryingHeldWeight = false;
+
+bool collection_holding() { return carryingHeldWeight; }
+void collection_stop_motion()
+{
+    arm.jumpTo(arm.angle());
+    state = COLLECTION_IDLE;
+    collectionStateEntry = false;
+    // Preserve the actual magnet command and held status, including after
+    // release. Stopping cannot put an already released weight back on the arm.
+}
+bool collection_release_held()
+{
+    if (state != COLLECTION_IDLE || !carryingHeldWeight) return false;
+    // Reuse the existing eased transfer/drop/rest sequence, not a new pickup.
+    state = COLLECTION_MOVE_TO_DROP;
+    collectionStateEntryTime = millis();
+    collectionStateEntry = true;
+    holdAtRestArmed = false;
+    return true;
+}
 
 
 void collection_init(void)
 {
     pinMode(MAGNET, OUTPUT);
+    analogWrite(MAGNET, 0);
     bigServo.attach(BIG_SERVO);
     arm.jumpTo(tuning.restAngle); // start parked (replaces the per-tick write(1) in collection_update)
 }
@@ -181,6 +203,7 @@ void collection_update(void)
                 // not by collection_magnets(), not at round end. Only a power
                 // cycle drops it. See BENCH_TODO.md 2d / config.h MAGNET_HOLD_PCT.
                 analogWrite(MAGNET, (int)((long)MAGNET_HOLD_PCT * 255 / 100));
+                carryingHeldWeight = true;
                 Serial.print(F("[collection] HOLD -> IDLE, magnet held at "));
                 Serial.print(MAGNET_HOLD_PCT); Serial.println(F("% indefinitely"));
                 state = COLLECTION_IDLE;
@@ -227,6 +250,7 @@ void collection_update(void)
             if (!magnetsReleased && millis() - collectionStateEntryTime >= DROP_SETTLE_MS)
             {
                 analogWrite(MAGNET, 0);
+                carryingHeldWeight = false;
                 magnetsReleased = true;
                 Serial.println(F("[collection] DROP: magnet OFF - weight released"));
             }

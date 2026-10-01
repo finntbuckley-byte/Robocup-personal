@@ -1,5 +1,26 @@
 # Robogooners
 
+## Current robot firmware: V10 homing integration
+
+The default PlatformIO environment is `nav` (Teensy 4.0). This is the V10
+`HOMING_V10_START_HEADING` version reported to run well in the arena on
+2 October 2026. See [delivery behaviour and field checks](HOMING%20V10%20START%20HEADING.md).
+
+- Capture home colour and IMU orientation at GO each round.
+- Return with three collected weights or at the existing late-round trigger.
+- Confirm home, align to the recorded starting heading, open the gate to empty
+  storage, then release the held third weight.
+- Confirm gate closure, leave the base, and resume collection while round time
+  and floor-colour checks permit. No fixed timeout on return travel.
+
+Build: `pio run -e nav`. Upload: `pio run -e nav -t upload`.
+Native software checks (PowerShell with g++): `./tools/test_homing.ps1`.
+Before this snapshot, the build and all 21 integration scenarios passed,
+including delivery followed by another pickup. Physical landing position still
+requires observation; there is no sensor confirming weights have left storage.
+
+The earlier working firmware remains in commit `f35ba75`.
+
 
 
 ## Getting started

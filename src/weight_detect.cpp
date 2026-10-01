@@ -11,6 +11,7 @@ static uint16_t viewRange(bool left)
 }
 uint16_t weightViewLeftMM() { return viewRange(true); }
 uint16_t weightViewRightMM() { return viewRange(false); }
+uint16_t weightViewCentreMM() { return tofOk(TOF_TOP) ? tofTop : 0; }
 
 // A bottom ToF sees something, and the 8x8's obstacle band on the same side
 // sees nothing at a similar distance -> something short -> weight candidate.
@@ -34,6 +35,7 @@ static bool weightRight()
 }
 
 bool     weightFound  = false;
+bool     weightCentreActive = false;
 int      weightSide   = 0;
 uint16_t weightDistMM = 0;
 int      pickupAttempts = 0;
@@ -46,6 +48,7 @@ void suppressTargetFor(unsigned long ms)
   targetSuppressUntil = millis() + ms;
   weightSeenSince = 0;
   weightFound = false;
+  weightCentreActive = false;
   weightSide = 0;
   weightDistMM = 0;
 }
@@ -57,16 +60,25 @@ void weightDetectUpdate()
   bool L = weightLeft();
   bool R = weightRight();
 
-  if (targetSuppressed()) { L = R = false; }
+  // Centre-facing top beam uses the same range, debounce and obstacle veto.
+  bool C = x8Fresh() && pairSeesWeight(weightViewCentreMM(), x8FrontMM());
+  if (targetSuppressed()) { L = R = C = false; }
+  weightCentreActive = false;
 
-  if (L || R)
+  if (L || R || C)
   {
     if (weightSeenSince == 0) weightSeenSince = millis();
 
     if (millis() - weightSeenSince >= WEIGHT_STICK_MS)
     {
       weightFound = true;
-      if (L && R)
+      if (C)
+      {
+        weightCentreActive = true;
+        weightSide = 0;
+        weightDistMM = weightViewCentreMM();
+      }
+      else if (L && R)
       {
         weightSide   = 0;
         weightDistMM = (weightViewLeftMM() < weightViewRightMM()) ? weightViewLeftMM() : weightViewRightMM();

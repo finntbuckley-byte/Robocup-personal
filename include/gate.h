@@ -1,10 +1,3 @@
-#ifndef __GATE_H
-#define __GATE_H
-
-#include <Arduino.h>
-
-void gate_init(void);
-void gate_move_test(void);
-void gate_update(void);
-
-#endif /* __GATE_H */
+#pragma once
+void gate_init(); void gate_update(); void gate_open(); void gate_close();
+void gate_moveTo(int); bool gate_isOpen(); bool gate_found(); int gate_readPos();

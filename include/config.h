@@ -100,6 +100,8 @@ const int TOF_BL      = 0;   // bottom-left  VL53L0X          CON29 / XSHUT2
 const int TOF_BR      = 1;   // bottom-right VL53L0X          CON28 / XSHUT1
 // Confirmed 30 Sept: physical right points left and physical left points right.
 const bool LOWER_BEAMS_CROSSED = true;
+// User-confirmed mounting: physical LEFT looks ~60 deg RIGHT and vice versa.
+// These are viewing sides, not a command to pivot through 60 degrees.
 const int TOF_UPRIGHT = 2;   // weight-detect, across notch   CON27 / XSHUT0
 const int TOF_REAR    = 3;   // rear VL53L0X (2026-09-28: swapped from L1X)  CON30 / XSHUT3
 // baseplate-top, lying-weight reject   CON31 / XSHUT4 - NOT YET FITTED
@@ -482,7 +484,12 @@ const unsigned long INDUCTIVE_CONFIRM_MS = 60;    // metal must read steadily th
 const int  CREEP_START_MM   = 200;   // candidate lost closer than this -> creep, not give up
 const int  CREEP_SPEED_PCT  = 30;
 const unsigned long CREEP_MAX_MS = 1000;   // no metal by then -> REJECT
-const int  MAX_PICKUP_TRIES = 3;
+const int  MAX_PICKUP_TRIES = 3; // total attempts per target, not three retries
+// Confirm only after the crane finishes: tolerate flicker, never one clear sample.
+const unsigned long PICKUP_VERIFY_MIN_MS = 600;
+const unsigned long PICKUP_CLEAR_CONFIRM_MS = 500;
+const unsigned long PICKUP_VERIFY_TIMEOUT_MS = 1500;
+const unsigned long PICKUP_VERIFY_MAX_SAMPLE_GAP_MS = 150;
 // after giving up on a weight, the inductive trigger stays locked until the
 // notch has read clear this long (else a stuck weight is retried forever)
 const unsigned long METAL_REARM_CLEAR_MS = 500;     // metal still in the notch after a cycle = missed grab -> retry
@@ -558,7 +565,8 @@ const unsigned long NOTCH_IGNORE_MS   = REJECT_SUPPRESS_MS;  // after a REJECT, 
 const float KP_APPROACH = 0.16f;
 const float KD_APPROACH = 0.045f;
 const int   APPROACH_STEER_MAX = 22;
-const int   ONE_SIDE_ARC_PCT   = 16;
+const int   ONE_SIDE_ARC_PCT   = 12; // gentle correction toward the crossed beam's target
+const int   ONE_SIDE_APPROACH_SPEED_PCT = 40; // slower while only one lower beam sees it
 
 // ---------------------------------------------------------------------------
 // PICKUP / REPOSITION / suppression
@@ -630,10 +638,37 @@ const unsigned long ROUND_END_MARGIN_MS = 1500;  // stop this early - finish sti
 // late-round: stop collecting and head home. Only applies once homing
 // exists (USE_HOMING 1) - without it, stopping early just wastes pickups,
 // since anything on board still scores 1x.
-#define USE_HOMING 0
-const unsigned long RETURN_HOME_AT_MS = 95000;
+#define USE_HOMING 1
+// Full delivery: shared round navigation, home colour and captured GO heading.
+constexpr bool HOMING_MOVEMENT_ONLY = false;
+// Return travel uses CRUISE_SPEED_PCT / TURN_SPEED_PCT from normal navigation.
+constexpr int HOME_EXIT_SPEED = 70, HOME_DELIVERY_TURN_SPEED = 100;
+// Roughly restore the recorded starting orientation, then confirm at rest.
+constexpr float HOME_DELIVERY_HEADING_TOLERANCE_DEG = 10.0f;
+// Home colour must still match for 600 ms; encoders only bound the base region.
+constexpr float HOME_ARRIVAL_RADIUS_MM = 600.0f;
+// TODO(verify): validate these return-only detour distances in the arena.
+constexpr float HOME_DETOUR_PASS_MM = 350.0f;
+constexpr unsigned long HOME_DETOUR_CLEAR_MS = 500;
+const unsigned long RETURN_HOME_AT_MS = ROUND_MS - ROUND_END_MARGIN_MS - 30000;
 // rules: >3 targets on board = -1 each. Stop collecting at the cap.
 const int MAX_TARGETS_ON_BOARD = 3;
+
+// Experimental home confirmation and gate interfaces (measured colour setup).
+#define COLOUR_WIRE Wire1
+constexpr uint8_t COLOUR_ADDRESS = 0x29;
+constexpr int COLOUR_INTEG_MS = 50, COLOUR_GAIN_X = 16;
+constexpr int COLOUR_MIN_CLEAR = 150;
+constexpr float COLOUR_BASE_GR_MIN = 1.0f, COLOUR_BLUE_BG_MIN = 1.0f;
+constexpr unsigned COLOUR_READ_MS = 60, COLOUR_STALE_MS = 300, COLOUR_CONFIRM_READS = 3;
+constexpr bool USE_COLOUR_GATING = true;
+#define GATE_SERIAL Serial2
+constexpr int GATE_ID = 4, GATE_BAUD = 115200; // confirmed by gate discovery and position test 2026-10-01
+constexpr int GATE_POS_MIN = 0, GATE_POS_MAX = 1023;
+constexpr int GATE_CLOSED_POS = 895, GATE_OPEN_POS = 613, GATE_PLAYTIME = 70;
+constexpr int GATE_POSITION_TOLERANCE = 35;
+#define GATE_REVERSE 0
+constexpr bool GATE_MOVE_ON_INIT = false, GATE_DELIVERY_ENABLED = true;
 
 // ---------------------------------------------------------------------------
 // SEARCH SCAN  (timed - no IMU on this rig yet, see "IMU HOOK" comments)

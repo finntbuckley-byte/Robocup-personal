@@ -10,6 +10,9 @@ void magnet_collect(void);
 // 3rd target, carried on the arm instead of stored. See BENCH_TODO.md 2d.
 void collection_start(bool holdAtRest = false);
 bool collection_busy(void);
+bool collection_holding();
+void collection_stop_motion(); // freeze crane, preserve magnet output
+bool collection_release_held(); // home-only adapter starts existing drop/rest sequence
 
 // Crane angles (deg) + speeds (deg/s). Start from config.h CRANE_*; the
 // servotest bench changes them live through collection_tuning().

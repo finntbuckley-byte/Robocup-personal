@@ -27,13 +27,15 @@ static float wrap180(float d)
 void poseReset()
 {
   px = py = 0;
-  lastDist = odomDistanceMM();
+  lastDist = odomRawDistanceMM();
   lastHeading = imuHeadingDeg();
 }
 
 void poseUpdate()
 {
-  float dist = odomDistanceMM();
+  // Integrate incremental encoder movement. The older slip estimate compares
+  // whichever obstacle is nearest and can introduce backwards position jumps.
+  float dist = odomRawDistanceMM();
   float step = dist - lastDist;
   lastDist = dist;
 
